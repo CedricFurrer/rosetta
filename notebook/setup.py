@@ -102,7 +102,7 @@ register_SimaPro_LCIA_methods(imported_methods = methods,
                               logs_output_path = output_path,
                               verbose = True)
 
-SALCA_method_names: list[tuple] = [m for m in bw2data.methods if "SALCA" in m[0]]
+SALCA_method_names: list[tuple] = [m for m in bw2data.methods if "SALCA" in m[0] and "no LT" not in m]
 add_excluded_longterm_method(original_method = SALCA_method_names,
                              method_string_to_be_added = "no LT",
                              verbose = True)
