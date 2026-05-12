@@ -767,7 +767,88 @@ def add_damage_normalization_weighting(original_method: tuple,
     # Flush data
     bw2data.methods.flush()
 
+
+
+def add_excluded_longterm_method(original_method: (tuple | list[tuple] | None) = None,
+                                 method_string_to_be_added: str = "no LT",
+                                 verbose: bool = True) -> None:
     
+    if original_method is None:
+        method_list: list[str] = bw2data.methods
+        
+    elif isinstance(original_method, tuple):
+        method_list: list[str] = [original_method]
+    
+    elif isinstance(original_method, list):
+        method_list: list[str] = original_method
+    
+    if verbose:
+        print("------------- Adding no long-term LCIA methods")
+    
+    for method in method_list:
+        
+        if method not in bw2data.methods:
+            raise ValueError(f"Method '{method}' is not registered in Brightway. " \
+                             "Thus, can not construct and add 'no longterm' LCIA method.")
+        
+        no_lt_method_name: tuple[str] = method + (method_string_to_be_added,)
+        
+        if no_lt_method_name in bw2data.methods:
+            del bw2data.methods[no_lt_method_name]
+        
+        cfs: list[tuple[tuple[str, str], float]] = copy.deepcopy(
+            bw2data.Method(method).load()
+        )
+        
+        at_least_one_exchange_set_to_0: bool = False
+        
+        # Set 
+        for (db, ID), cf in cfs:
+            categories: (tuple | None) = bw2data.Database(db).get(ID).get("categories")
+            
+            if categories is None:
+                raise ValueError("Could not find 'categories' for biosphere flow " \
+                                 f"'{(db, ID)}'.")
+            
+            sub_cat: str = categories[1] if len(categories) > 1 else ""
+            is_longterm: bool = "longterm" in sub_cat or "long-term" in sub_cat
+            
+            if is_longterm:
+                cf: float = 0.0
+                at_least_one_exchange_set_to_0: bool = True
+        
+        
+        if at_least_one_exchange_set_to_0:
+            
+            # Register a new method
+            method_new = bw2data.Method(no_lt_method_name)
+            method_new.register()
+            
+            # Add new characterization factors to the registered method
+            method_new.write(cfs)
+            
+            # Add metadata
+            # ... method unit
+            bw2data.methods[no_lt_method_name]["unit"] = (
+                bw2data.methods[method]["unit"]    
+            )
+            
+            # ... method description
+            bw2data.methods[no_lt_method_name]["description"] = (
+                f"Characterization factors for long-term emissions (subcompartment " \
+                "containing a sring like 'long-term') set to 0.\n\n" \
+                f"{bw2data.methods[method].get('unit', '')}"
+            )
+            
+            # Flush data
+            bw2data.methods.flush()
+            
+            if verbose:
+                print(f" - {no_lt_method_name}")
+    
+    if verbose:
+        print()
+        
 
 # Extract the biosphere flows, method names and duplicated flows and export to XLSX
 def write_biosphere_flows_and_method_names_to_XLSX(biosphere_db_name: str,
@@ -1002,6 +1083,7 @@ def register_SimaPro_LCIA_methods(imported_methods: list,
                                   Brightway_project_name: str,
                                   BRIGHTWAY2_DIR: pathlib.Path,
                                   logs_output_path: pathlib.Path,
+                                  append_missing_regionalized_flows: bool = True,
                                   verbose: bool = True):
     
     # Make variable check
@@ -1073,9 +1155,10 @@ def register_SimaPro_LCIA_methods(imported_methods: list,
     # Why? Because if not, we would possibly underestimate the environmental impact in case a regionalized flow is not catched by the method
     # We loop through each LCIA method registered (from the background) and compare all biosphere flows in there with the biosphere database.
     # In case there are flows with the same name but different region which have not yet been added to the methods, they will be added by using the factor for 'GLO'
-    append_missing_regionalized_flows_to_methods(biosphere_standardized = biosphere_dict,
-                                                 logs_output_path = logs_output_path,
-                                                 verbose = verbose)
+    if append_missing_regionalized_flows:
+        append_missing_regionalized_flows_to_methods(biosphere_standardized = biosphere_dict,
+                                                     logs_output_path = logs_output_path,
+                                                     verbose = verbose)
     
 
 

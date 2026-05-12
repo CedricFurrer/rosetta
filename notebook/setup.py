@@ -14,6 +14,7 @@ import link
 from  datetime import datetime
 from functools import partial
 from lcia import (import_SimaPro_LCIA_methods,
+                  add_excluded_longterm_method,
                   register_biosphere,
                   register_SimaPro_LCIA_methods,
                   write_biosphere_flows_and_method_names_to_XLSX)
@@ -37,7 +38,6 @@ LCI_wfldb_simapro_folderpath: pathlib.Path = here.parent / "data" / "lci" / "WFL
 LCI_salca_simapro_folderpath: pathlib.Path = here.parent / "data" / "lci" / "SALCA_fromSimaPro"
 LCI_fooddk_simapro_folderpath: pathlib.Path = here.parent / "data" / "lci" / "FoodDK_fromSimaPro"
 LCI_esu_simapro_folderpath: pathlib.Path = here.parent / "data" / "lci" / "ESU_fromSimaPro"
-# LCIA_SimaPro_CSV_folderpath: pathlib.Path = here.parent / "data" / "lcia" / "fromSimaPro - Copie"
 LCIA_SimaPro_CSV_folderpath: pathlib.Path = here.parent / "data" / "lcia" / "fromSimaPro"
 
 
@@ -63,6 +63,7 @@ change_brightway_project_directory(project_path)
 if project_name in bw2data.projects:
     raise ValueError("Project '{}' already exists and does not need any setup.".format(project_name))
     # bw2data.projects.delete_project(project_name)
+    # list(bw2data.projects)
 
 # Set project
 bw2data.projects.set_current(project_name)
@@ -100,6 +101,11 @@ register_SimaPro_LCIA_methods(imported_methods = methods,
                               BRIGHTWAY2_DIR = project_path,
                               logs_output_path = output_path,
                               verbose = True)
+
+SALCA_method_names: list[tuple] = [m for m in bw2data.methods if "SALCA" in m[0] and "no LT" not in m]
+add_excluded_longterm_method(original_method = SALCA_method_names,
+                             method_string_to_be_added = "no LT",
+                             verbose = True)
 
 write_biosphere_flows_and_method_names_to_XLSX(biosphere_db_name = biosphere_db_name_simapro,
                                                output_path = output_path,
