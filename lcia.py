@@ -773,8 +773,10 @@ def add_excluded_longterm_method(original_method: (tuple | list[tuple] | None) =
                                  method_string_to_be_added: str = "no LT",
                                  verbose: bool = True) -> None:
     
+    all_methods: list[str] = list(bw2data.methods)
+    
     if original_method is None:
-        method_list: list[str] = bw2data.methods
+        method_list: list[str] = all_methods
         
     elif isinstance(original_method, tuple):
         method_list: list[str] = [original_method]
@@ -787,20 +789,19 @@ def add_excluded_longterm_method(original_method: (tuple | list[tuple] | None) =
     
     for method in method_list:
         
-        if method not in bw2data.methods:
+        if method not in all_methods:
             raise ValueError(f"Method '{method}' is not registered in Brightway. " \
                              "Thus, can not construct and add 'no longterm' LCIA method.")
         
         no_lt_method_name: tuple[str] = method + (method_string_to_be_added,)
         
-        if no_lt_method_name in bw2data.methods:
+        if no_lt_method_name in all_methods:
             del bw2data.methods[no_lt_method_name]
         
-        cfs: list[tuple[tuple[str, str], float]] = copy.deepcopy(
-            bw2data.Method(method).load()
-        )
+        cfs: list[tuple[tuple[str, str], float]] = bw2data.Method(method).load()
         
         at_least_one_exchange_set_to_0: bool = False
+        new_cfs: list[tuple] = []
         
         # Set 
         for (db, ID), cf in cfs:
@@ -814,8 +815,11 @@ def add_excluded_longterm_method(original_method: (tuple | list[tuple] | None) =
             is_longterm: bool = "longterm" in sub_cat or "long-term" in sub_cat
             
             if is_longterm:
-                cf: float = 0.0
+                new_cfs += [((db, ID), 0.0)]
                 at_least_one_exchange_set_to_0: bool = True
+                
+            else:
+                new_cfs += [((db, ID), cf)]
         
         
         if at_least_one_exchange_set_to_0:
@@ -825,7 +829,7 @@ def add_excluded_longterm_method(original_method: (tuple | list[tuple] | None) =
             method_new.register()
             
             # Add new characterization factors to the registered method
-            method_new.write(cfs)
+            method_new.write(new_cfs)
             
             # Add metadata
             # ... method unit
