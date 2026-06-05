@@ -1,5 +1,5 @@
-# bw2_sp
-The "bw2_sp" repository is a collection of useful functions to work with SimaPro data in Brightway.
+# rosetta
+The "rosetta" repository is a collection of useful functions to work with SimaPro data in Brightway.
 
 The repository provides several modules that contain functions for different purposes:
 - [lci.py](lci.py) contains functions to import and harmonize life cycle inventory data from either SimaPro or XML (ecospold2) data
