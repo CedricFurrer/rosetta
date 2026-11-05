@@ -1,5 +1,5 @@
-
-__version__: tuple = (1, 0, 1)
+__version_info__: tuple = (1, 0, 1)
+__version__: str = ".".join(str(m) for m in __version_info__)
 
 # Works with the following packages and versions
 
@@ -11,5 +11,3 @@ __version__: tuple = (1, 0, 1)
 # sentence-transformers: v2.7.0
 
 # Use 'conda install -c conda-forge sentence-transformers=2.7.0'
-
-

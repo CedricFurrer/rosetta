@@ -1,22 +1,18 @@
 import pathlib
 
-if __name__ == "__main__":
-    import os
-    os.chdir(pathlib.Path(__file__).parent)
-
 import uuid
 import copy
 import math
 import bw2data
-import helper as hp
+from . import helper as hp
 
-from defaults.compartments import (SIMAPRO_TECHNOSPHERE_COMPARTMENTS,
+from .defaults.compartments import (SIMAPRO_TECHNOSPHERE_COMPARTMENTS,
                                    SIMAPRO_SUBSTITUTION_COMPARTMENTS,
                                    SIMAPRO_CATEGORY_TYPE_COMPARTMENT_MAPPING,
                                    SIMAPRO_PRODUCT_COMPARTMENTS
                                    )
 
-from defaults.units import backward_unit_normalization_mapping
+from .defaults.units import backward_unit_normalization_mapping
 
 #%% Function 'create_base_inventory'
 

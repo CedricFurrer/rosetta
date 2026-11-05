@@ -1,9 +1,6 @@
 import pathlib
 import os
 
-if __name__ == "__main__":
-    os.chdir(pathlib.Path(__file__).parent)
-
 import ast
 import numpy
 import pathlib
@@ -13,7 +10,7 @@ import bw2data
 import numpy as np
 import pandas as pd
 from bw2calc.errors import OutsideTechnosphere
-import helper as hp
+from . import helper as hp
 
 
 #%%

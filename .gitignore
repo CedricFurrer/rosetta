@@ -59,16 +59,17 @@ Thumbs.db
 
 # Files #
 #########
-defaults/all-MiniLM-L6-v2.zip
+src/rosetta/defaults/all-MiniLM-L6-v2.zip
 
 # Ignored folders #
 ###################
 data/lci/*
 data/lcia/*
+data/correspondence/*
 notebook/notebook_data/*
 notebook/Brightway2.5_projects
 notebook/Brightway2_projects
-defaults/all-MiniLM-L6-v2
+src/rosetta/defaults/all-MiniLM-L6-v2
 */archive/*
 archive/*
 
@@ -76,10 +77,17 @@ archive/*
 #################
 !data/lci/.gitkeep
 !data/lcia/.gitkeep
+!data/correspondence/.gitkeep
 
 # Exclude or include folders and files #
 ########################################
 !notebook/notebook_data
 notebook/Brightway_projects
-!defaults/CAS.json
+!src/rosetta/defaults/CAS.json
 
+# Build artifacts #
+###################
+build/
+dist/
+*.egg-info/
+src/rosetta/UUIDs.xlsx

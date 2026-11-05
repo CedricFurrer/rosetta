@@ -7,15 +7,15 @@ if __name__ == "__main__":
 
 import copy
 import json
-import utils
+from rosetta import utils
 import bw2io
 import bw2data
-import link
+from rosetta import link
 import datetime
 import pandas as pd
 from ast import literal_eval
 from functools import partial
-from lcia import (import_SimaPro_LCIA_methods,
+from rosetta.lcia import (import_SimaPro_LCIA_methods,
                   import_XML_LCIA_methods,
                   register_biosphere,
                   register_SimaPro_LCIA_methods,
@@ -23,7 +23,7 @@ from lcia import (import_SimaPro_LCIA_methods,
                   # add_damage_normalization_weighting,
                   write_biosphere_flows_and_method_names_to_XLSX)
 
-from lci import (unregionalize_biosphere,
+from rosetta.lci import (unregionalize_biosphere,
                  import_SimaPro_LCI_inventories,
                  import_XML_LCI_inventories,
                  migrate_from_excel_file,
@@ -32,17 +32,17 @@ from lci import (unregionalize_biosphere,
                  create_XML_biosphere_from_LCI,
                  select_inventory_using_regex)
 
-from harmonization import (create_harmonized_biosphere_migration,
+from rosetta.harmonization import (create_harmonized_biosphere_migration,
                            elementary_flows_that_are_not_used_in_XML_methods)
 
-from activity_harmonization import (ActivityHarmonization,
+from rosetta.activity_harmonization import (ActivityHarmonization,
                                     ActivityDefinition)
 
-from correspondence.correspondence import Correspondence
+from rosetta.correspondence.correspondence import Correspondence
 
-from utils import (change_brightway_project_directory,
+from rosetta.utils import (change_brightway_project_directory,
                    change_database_name)
-from calculation import LCA_Calculation
+from rosetta.calculation import LCA_Calculation
 
 
 #%% File- and folderpaths, key variables
@@ -82,7 +82,7 @@ project_name: str = "Brightway paper v2.1"
 # project_name: str = "test"
 
 # Correspondence files
-folderpath_correspondence_files: pathlib.Path = here.parent / "correspondence" / "data"
+folderpath_correspondence_files: pathlib.Path = here.parent / "data" / "correspondence"
 
 #%% Change brightway project directory and setup project
 change_brightway_project_directory(project_path)
@@ -890,7 +890,7 @@ correspondence_obj: Correspondence = Correspondence(ecoinvent_model_type = "cuto
 
 # Add the correspondence data to the correspondence object
 for filename, FROM_version, TO_version in correspondence_files_and_versions:
-    correspondence_obj.read_correspondence_dataframe(filepath_correspondence_excel = here.parent / "correspondence" / "data" / filename,
+    correspondence_obj.read_correspondence_dataframe(filepath_correspondence_excel = here.parent / "data" / "correspondence" / filename,
                                                      FROM_version = FROM_version,
                                                      TO_version = TO_version
                                                      )

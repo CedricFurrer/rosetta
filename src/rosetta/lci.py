@@ -1,9 +1,6 @@
 import pathlib
 
-if __name__ == "__main__":
-    import os
-    os.chdir(pathlib.Path(__file__).parent)
-
+import os
 import re
 import ast
 import copy
@@ -14,10 +11,10 @@ import pathlib
 import hashlib
 import datetime
 import pandas as pd
-import helper as hp
-import link
+from . import helper as hp
+from . import link
 from functools import partial
-from lcia import (ensure_categories_are_tuples,
+from .lcia import (ensure_categories_are_tuples,
                   create_SimaPro_fields,
                   normalize_simapro_biosphere_categories,
                   transformation_units,
@@ -25,14 +22,14 @@ from lcia import (ensure_categories_are_tuples,
                   add_top_and_subcategory_fields_for_biosphere_flows,
                   normalize_and_add_CAS_number)
 
-from defaults.categories import (BACKWARD_SIMAPRO_BIO_TOPCATEGORIES_MAPPING,
+from .defaults.categories import (BACKWARD_SIMAPRO_BIO_TOPCATEGORIES_MAPPING,
                                  BACKWARD_SIMAPRO_BIO_SUBCATEGORIES_MAPPING)
 
-from defaults.units import (backward_unit_normalization_mapping)
-from defaults.model_type import (XML_TO_SIMAPRO_MODEL_TYPE_MAPPING,
+from .defaults.units import (backward_unit_normalization_mapping)
+from .defaults.model_type import (XML_TO_SIMAPRO_MODEL_TYPE_MAPPING,
                                  XML_TO_SIMAPRO_PROCESS_TYPE_MAPPING)
 
-from defaults.compartments import (SIMAPRO_PRODUCT_COMPARTMENTS,
+from .defaults.compartments import (SIMAPRO_PRODUCT_COMPARTMENTS,
                                    SIMAPRO_TECHNOSPHERE_COMPARTMENTS,
                                    SIMAPRO_CATEGORY_TYPE_COMPARTMENT_MAPPING)
 
@@ -241,7 +238,8 @@ def set_code(db_var,
              remove_special_characters: bool):
 
     # Path to input file where UUIDs are stored
-    file_path = pathlib.Path(__file__).parent / "UUIDs.xlsx"
+    # Defaults to 'UUIDs.xlsx' next to this module; can be overwritten with the environment variable 'ROSETTA_UUID_FILE'
+    file_path = pathlib.Path(os.environ.get("ROSETTA_UUID_FILE", pathlib.Path(__file__).parent / "UUIDs.xlsx"))
     
     # Current date formatted as a string
     current_date_string = datetime.datetime.now().strftime("%Y-%m-%d")

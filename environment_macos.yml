@@ -1,0 +1,30 @@
+# macOS (Intel) environment for rosetta, derived from bw2_ab_environment.yml
+# (that file is a Linux export with Linux-only packages and cannot be solved on macOS)
+name: rosetta
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - brightway2=2.4.6
+  - bw2io=0.8.12
+  - bw2data=3.6.6
+  - bw2calc=1.8.2
+  - bw2analyzer=0.10
+  - bw2parameters=1.1.0
+  - numpy=1.26.4
+  - pandas=2.3
+  - scipy
+  - lxml
+  - pydantic
+  - openpyxl
+  - xlsxwriter
+  - pytorch
+  - sentence-transformers=2.7.0
+  - transformers
+  - scikit-learn
+  - matplotlib
+  - plotly
+  - pyarrow
+  - ipykernel
+  - spyder=6
+  - spyder-kernels=3

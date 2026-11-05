@@ -1,12 +1,8 @@
 import pathlib
 
-if __name__ == "__main__":
-    import os
-    os.chdir(pathlib.Path(__file__).parent)
-
 import bw2io
 import bw2data
-import helper as hp
+from . import helper as hp
 
 #%%
 # We have to modify the ExchangeLinker function

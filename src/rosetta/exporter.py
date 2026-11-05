@@ -1,14 +1,11 @@
 import os
 import pathlib
 
-if __name__ == "__main__":
-    os.chdir(pathlib.Path(__file__).parent)
-
 import bw2data
 import datetime
 import numpy as np
-import helper as hp
-from defaults.compartments import (SIMAPRO_COMPARTMENTS,
+from . import helper as hp
+from .defaults.compartments import (SIMAPRO_COMPARTMENTS,
                                    SIMAPRO_COMPARTMENT_ORDER)
 
 #%% Local path

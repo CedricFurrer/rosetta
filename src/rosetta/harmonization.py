@@ -1,13 +1,9 @@
 import pathlib
 
-if __name__ == "__main__":
-    import os
-    os.chdir(pathlib.Path(__file__).parent)
-
 # import copy
 import pandas as pd
-from utils import (map_using_SBERT)
-from helper import (check_function_input_type)
+from .utils import (map_using_SBERT)
+from .helper import (check_function_input_type)
 # from lci import (create_structured_migration_dictionary_from_excel)
 
 #%% Helper functions

@@ -1,9 +1,5 @@
 import pathlib
 
-if __name__ == "__main__":
-    import os
-    os.chdir(pathlib.Path(__file__).parent)
-
 import json
 import copy
 import uuid
@@ -12,12 +8,12 @@ import bw2data
 import pathlib
 import pandas as pd
 from functools import partial
-import helper as hp
-from defaults.categories import (SIMAPRO_BIO_TOPCATEGORIES_MAPPING, SIMAPRO_BIO_SUBCATEGORIES_MAPPING)
-from defaults.units import (unit_transformation_mapping,
+from . import helper as hp
+from .defaults.categories import (SIMAPRO_BIO_TOPCATEGORIES_MAPPING, SIMAPRO_BIO_SUBCATEGORIES_MAPPING)
+from .defaults.units import (unit_transformation_mapping,
                             backward_unit_normalization_mapping)
-from defaults.locations import (LOCATIONS)
-import utils
+from .defaults.locations import (LOCATIONS)
+from . import utils
 
 starting: str = "------------"
 

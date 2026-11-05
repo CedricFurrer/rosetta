@@ -1,9 +1,6 @@
 import pathlib
 import os
 
-if __name__ == "__main__":
-    os.chdir(pathlib.Path(__file__).parent)
-
 import uuid
 import copy
 import torch
@@ -14,7 +11,7 @@ import collections
 import pandas as pd
 from functools import partial
 from sentence_transformers import SentenceTransformer, util
-import helper as hp
+from . import helper as hp
 
 starting: str = "------------"
 

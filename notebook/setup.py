@@ -7,23 +7,23 @@ if __name__ == "__main__":
 
 import copy
 import json
-import utils
+from rosetta import utils
 import bw2io
 import bw2data
-import link
+from rosetta import link
 from  datetime import datetime
 from functools import partial
-from lcia import (import_SimaPro_LCIA_methods,
+from rosetta.lcia import (import_SimaPro_LCIA_methods,
                   add_excluded_longterm_method,
                   register_biosphere,
                   register_SimaPro_LCIA_methods,
                   write_biosphere_flows_and_method_names_to_XLSX)
 
-from lci import (import_SimaPro_LCI_inventories,
+from rosetta.lci import (import_SimaPro_LCI_inventories,
                  migrate_from_excel_file,
                  select_inventory_using_regex)
 
-from utils import (change_brightway_project_directory,
+from rosetta.utils import (change_brightway_project_directory,
                    change_database_name)
 
 

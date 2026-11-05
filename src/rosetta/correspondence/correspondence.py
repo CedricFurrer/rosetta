@@ -1,10 +1,6 @@
 import pathlib
 here: pathlib.Path = pathlib.Path(__file__).parent
 
-if __name__ == "__main__":
-    import os
-    os.chdir(here.parent)
-
 import re
 import pathlib
 import pandas as pd
@@ -600,7 +596,7 @@ if __name__ == "__main__":
     correspondence: Correspondence = Correspondence(ecoinvent_model_type = "cutoff")
     
     for filename, FROM_version, TO_version in files:       
-        correspondence.read_correspondence_dataframe(filepath_correspondence_excel = here / "data" / filename,
+        correspondence.read_correspondence_dataframe(filepath_correspondence_excel = here.parents[2] / "data" / "correspondence" / filename,
                                                      FROM_version = FROM_version,
                                                      TO_version = TO_version
                                                      )

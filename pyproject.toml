@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rosetta"
+dynamic = ["version"]
+description = "Functions to import, harmonize, link, calculate and export SimaPro LCI/LCIA data in Brightway2."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Cedric Furrer" }]
+dependencies = [
+    "bw2io==0.8.12",
+    "bw2data==3.6.6",
+    "bw2calc==1.8.2",
+    "bw2analyzer==0.10",
+    "sentence-transformers==2.7.0",
+    "torch",
+    "numpy<2",
+    "pandas",
+    "lxml",
+    "pydantic>=2",
+    "openpyxl",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.urls]
+Repository = "https://github.com/CedricFurrer/rosetta"
+
+[tool.setuptools.dynamic]
+version = { attr = "rosetta.__version__.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+rosetta = ["defaults/*.json"]

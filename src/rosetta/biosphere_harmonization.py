@@ -1,6 +1,6 @@
 import torch
 import pathlib
-import helper as hp
+from . import helper as hp
 from dataclasses import asdict
 from pydantic import field_validator
 from pydantic.dataclasses import dataclass
