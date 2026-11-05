@@ -1,9 +1,8 @@
-import pathlib
 
 # import copy
 import pandas as pd
-from .utils import (map_using_SBERT)
-from .helper import (check_function_input_type)
+from .sbert import map_using_SBERT
+from .._helpers import check_function_input_type
 # from lci import (create_structured_migration_dictionary_from_excel)
 
 #%% Helper functions

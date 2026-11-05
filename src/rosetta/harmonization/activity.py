@@ -1,4 +1,3 @@
-import copy
 import torch
 import pathlib
 from dataclasses import asdict
@@ -6,7 +5,10 @@ from pydantic import field_validator
 from pydantic.dataclasses import dataclass
 from typing import Optional, Callable
 from functools import partial
-from sentence_transformers import SentenceTransformer, util
+from sentence_transformers import util
+
+from .._paths import SBERT_MODEL_DIR
+from .sbert import default_device, load_sbert_model
 
 def prep(string: (str | None), lower: bool = True, strip: bool = True) -> (str | None):
     if isinstance(string, str):
@@ -140,7 +142,7 @@ def get_SBERT_options(act: ActivityDefinition) -> tuple[str]:
         
         
         
-DEFAULT_PATH_TO_SBERT_MODEL: pathlib.Path = pathlib.Path(__file__).parent / "defaults" / "all-MiniLM-L6-v2"
+DEFAULT_PATH_TO_SBERT_MODEL: pathlib.Path = SBERT_MODEL_DIR
 
 class ActivityHarmonization:
     
@@ -356,13 +358,7 @@ class ActivityHarmonization:
         if self._mapping_type_direct not in self._source_definitions:
             return ()
         
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-
-        # Load SBERT model
-        if path_to_model is not None and path_to_model.exists():
-            model = SentenceTransformer(str(path_to_model), device = device)
-        else:
-            model = SentenceTransformer("all-MiniLM-L6-v2", device = device)
+        model = load_sbert_model(path_to_model, device = default_device())
                 
         if self._encoded_TOs is None:
             self._TOs_prepared: tuple = ()

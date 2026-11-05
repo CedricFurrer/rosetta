@@ -1,21 +1,18 @@
 import pathlib
-import os
 
 import ast
-import numpy
-import pathlib
 import datetime
 import bw2calc
 import bw2data
 import numpy as np
 import pandas as pd
 from bw2calc.errors import OutsideTechnosphere
-from . import helper as hp
+from . import _helpers as hp
 
 
 #%%
 
-class LCA_Calculation():
+class LCACalculation:
     
     def __init__(self,
                  activities: list,
@@ -1425,7 +1422,7 @@ class LCA_Calculation():
 #     acts: list = [m for m in bw2data.Database("AgriFootprint v6.3 - SimaPro")]
 #     mets: list[tuple] = [m for m in bw2data.methods][0]
     
-#     lca_calculation: LCA_Calculation = LCA_Calculation(activities = acts,
+#     lca_calculation: LCACalculation = LCACalculation(activities = acts,
 #                                                        methods = mets,
 #                                                        functional_amount = 1,
 #                                                        cut_off_percentage = None,

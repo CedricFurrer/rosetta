@@ -1,659 +1,295 @@
-import pathlib
+"""Build standardized (SimaPro-compatible) Brightway inventories and exchanges.
 
-import uuid
+Example::
+
+    electricity = Exchange.from_activity("ecoinvent v3.11", "a1b2...", type="technosphere", amount=0.3)
+    co2 = Exchange(name="Carbon dioxide, fossil", simapro_name="Carbon dioxide, fossil",
+                   categories=("air",), simapro_categories=("Emissions to air",),
+                   unit="kilogram", location="GLO", amount=1.2, type="biosphere",
+                   uncertainty=Uncertainty("lognormal distr.", scale=1.1))
+    inventory = Inventory(name="My product", simapro_name="My product {CH}", simapro_category_type="material",
+                          unit="kilogram", location="CH", simapro_classification=("Agriculture",),
+                          amount=1, database="my database", exchanges=[electricity, co2])
+    dataset = inventory.to_dict()
+"""
+
 import copy
 import math
+import uuid
+from dataclasses import dataclass, field
+from typing import Self
+
 import bw2data
-from . import helper as hp
 
-from .defaults.compartments import (SIMAPRO_TECHNOSPHERE_COMPARTMENTS,
-                                   SIMAPRO_SUBSTITUTION_COMPARTMENTS,
-                                   SIMAPRO_CATEGORY_TYPE_COMPARTMENT_MAPPING,
-                                   SIMAPRO_PRODUCT_COMPARTMENTS
-                                   )
-
+from .defaults.compartments import (SIMAPRO_CATEGORY_TYPE_COMPARTMENT_MAPPING,
+                                    SIMAPRO_PRODUCT_COMPARTMENTS,
+                                    SIMAPRO_SUBSTITUTION_COMPARTMENTS,
+                                    SIMAPRO_TECHNOSPHERE_COMPARTMENTS)
 from .defaults.units import backward_unit_normalization_mapping
 
-#%% Function 'create_base_inventory'
+UNCERTAINTY_TYPES: dict[str, int] = {"undefined": 0,
+                                     "no uncertainty": 1,
+                                     "lognormal distr.": 2,
+                                     "normal distr.": 3,
+                                     "uniform distr.": 4,
+                                     "triangular distr.": 5,
+                                     "bernoulli distr.": 6,
+                                     "discrete uniform": 7,
+                                     "weibull": 8,
+                                     "gamma": 9,
+                                     "beta distr.": 10,
+                                     "generalized extreme value": 11,
+                                     "student's T": 12}
 
-# Function to be used to create valid Brightway2 inventories
-def create_base_inventory(inv_name: str,
-                          inv_SimaPro_name: str,
-                          inv_cat: (tuple | None),
-                          inv_SimaPro_category_type: str,
-                          inv_unit: str,
-                          inv_SimaPro_unit: (str | None),
-                          inv_location: str,
-                          inv_SimaPro_classification: tuple,
-                          inv_amount: (float | int),
-                          inv_database: str,
-                          inv_allocation: (float | int) = 1,
-                          inv_type: str = "process",
-                          inv_code: (str | None) = None,
-                          inv_exchanges: list = [],
-                          overwrite_existing_key_value_pairs_with_kwargs: bool = False,
-                          **kwargs: dict):
-    """
-    Create a valid inventory dictionary for Brightway2
+# Parameters that need to be given for each uncertainty type
+REQUIRED_UNCERTAINTY_FIELDS: dict[str, list[str]] = {"undefined": ["loc"],
+                                                     "no uncertainty": ["loc"],
+                                                     "lognormal distr.": ["negative", "loc", "scale"],
+                                                     "normal distr.": ["negative", "loc", "scale"],
+                                                     "uniform distr.": ["negative", "minimum", "maximum"],
+                                                     "triangular distr.": ["negative", "minimum", "maximum"],
+                                                     "bernoulli distr.": ["loc"],
+                                                     "discrete uniform": ["maximum"],
+                                                     "weibull": ["scale", "shape"],
+                                                     "gamma": ["scale", "shape"],
+                                                     "beta distr.": ["loc", "shape"],
+                                                     "generalized extreme value": ["loc", "scale", "shape"],
+                                                     "student's T": ["shape"]}
+
+EXCHANGE_TYPES: tuple[str, ...] = ("technosphere", "biosphere", "substitution")
+
+
+def _simapro_unit(unit: str, simapro_unit: str | None, field_name: str) -> str:
+    if simapro_unit is not None:
+        return simapro_unit
+    mapped: str | None = backward_unit_normalization_mapping.get(unit)
+    if mapped is None:
+        raise ValueError("'{0}' could not be mapped from unit '{1}'. Provide '{0}'.".format(field_name, unit))
+    return mapped
+
+
+def _add_extra(target: dict, extra: dict, allow_overwrite: bool, kind: str) -> dict:
+    for k, v in extra.items():
+        if not allow_overwrite and k in target:
+            raise ValueError("Key/value pair already exists in {0}. Problematic key: '{1}'.\n\nEither set 'allow_overwrite' to True or do NOT pass the key again via 'extra'.".format(kind, k))
+        target[k] = v
+    return target
+
+
+@dataclass
+class Uncertainty:
+    """Uncertainty of an exchange amount.
 
     Parameters
     ----------
-    inv_name : str
-        Inventory name.
-    
-    inv_SimaPro_name : str
-        Inventory name in SimaPro standard.
-    
-    inv_cat : tuple | None
-        Inventory category. If None is provided, will use categories extracted from 'inv_SimaPro_category_type'.
-    
-    inv_SimaPro_category_type : str
-        The category type of the inventory in SimaPro standard.
-        One of the following strings are accepted: 'material', 'energy', 'waste treatment', 'processing', 'transport', 'use'
-
-    inv_unit : str
-        Inventory unit.
-    
-    inv_SimaPro_unit : str | None
-        Exchange unit in SimaPro standard. If it is not provided, it will be tried to backward map the unit using the 'unit' field and the mapping from Brightway.  
-    
-    inv_location : str
-        Inventory location.
-    
-    inv_SimaPro_classification : tuple
-         The inventory classification given in SimaPro.
-    
-    inv_amount : (float | int)
-        Inventory output amount.
-        
-    inv_database : str
-        Inventory database.
-
-    inv_allocation : (float | int), optional
-        Allocation of the current inventory. The default is 1.
-        
-    inv_type : str, optional
-        Inventory type. The default is "process".
-        
-    inv_code : (str | None), optional
-        Inventory code. If no code is provided (= None), a UUID will automatically be generated. The default is None.
-    
-    inv_exchanges : list, optional
-        List of exchanges (inputs, outputs, emissions). The default is an empty list ([]).
-    
-    overwrite_existing_key_value_pairs_with_kwargs : bool, optional
-        Defines whether to check if key/value pairs would be overwritten by **kwargs if **kwargs are given as function inputs. The default is False.
-    
-    **kwargs : dict
-        Additional key/value pairs to be passed to the inventory.
-
-    Returns
-    -------
-    inv : dict
-        An inventory dictionary in valid Brightway2 format is returned.
-
+    type
+        Name (e.g. ``"lognormal distr."``) or Brightway number (e.g. ``2``) of the distribution. Types above 5 are not supported.
+    scale, shape, minimum, maximum
+        Distribution parameters. For lognormal, ``scale`` is the geometric variance (SimaPro's squared geometric
+        standard deviation); for normal, the variance. They are transformed to Brightway's parameters unless
+        ``brightway_parameters`` is True.
+    brightway_parameters
+        The parameters are already in Brightway form (e.g. taken from an existing inventory) and are used as is.
     """
-    
-    # Function input variable check
-    hp.check_function_input_type(create_base_inventory, locals())
-    
-    # Check if the amount is 0 and raise error if so.
-    if inv_amount <= 0:
-        raise ValueError("Input variable 'inv_amount' can not be 0 and can not be negative but is currently" + str(inv_amount) + "! Change.")
-    
-    # Validate allocation, needs to be between 0 and 1
-    if inv_allocation > 1 or inv_allocation <= 0:
-        raise ValueError("Input variable 'inv_allocation' must be greater than 0 (can not be 0!) and smaller than 1 but is currently '" + str(inv_allocation) + "'. Change.")
-    
-    # The only acceptable category types
-    if inv_SimaPro_category_type not in SIMAPRO_CATEGORY_TYPE_COMPARTMENT_MAPPING:
-        raise ValueError("Category type provided by 'inv_SimaPro_category_type' is not accepted. It needs to be one of " + str(list(SIMAPRO_CATEGORY_TYPE_COMPARTMENT_MAPPING)) + " but it is currently '" + inv_SimaPro_category_type + "'")
-    
-    # If no inventory code is provided, one is automatically generated
-    if inv_code is None:
-        inv_code = str(uuid.uuid4())
-    
-    # Check if SimaPro unit is provided as function input
-    if inv_SimaPro_unit is None:
-        
-        # If not, map the unit given to the SimaPro standard
-        inv_SimaPro_unit_mapped = backward_unit_normalization_mapping.get(inv_unit)
-        
-        # If mapping has failed, raise error
-        if inv_SimaPro_unit_mapped is None:
-            raise ValueError("'inv_SimaPro_unit' could not be mapped from 'inv_unit' (" + str(inv_unit) + "). Provide 'inv_SimaPro_unit' as function input (not using None).")
-    
-    # Initialize empty dictionary for the inventory
-    inv = {}
-    
-    # Add information to inventory dictionary
-    inv["name"] = inv_name
-    inv["SimaPro_name"] = inv_SimaPro_name
-    inv["categories"] = inv_cat if inv_cat is not None else (SIMAPRO_CATEGORY_TYPE_COMPARTMENT_MAPPING[inv_SimaPro_category_type],)
-    inv["SimaPro_categories"] = (SIMAPRO_CATEGORY_TYPE_COMPARTMENT_MAPPING[inv_SimaPro_category_type],)
-    inv["SimaPro_category_type"] = inv_SimaPro_category_type
-    inv["unit"] = inv_unit
-    inv["SimaPro_unit"] = inv_SimaPro_unit if inv_SimaPro_unit is not None else inv_SimaPro_unit_mapped 
-    inv["location"] = inv_location
-    inv["SimaPro_classification"] = inv_SimaPro_classification
-    inv["production amount"] = inv_amount / inv_allocation 
-    inv["output amount"] = inv_amount
-    inv["allocation"] = inv_allocation
-    inv["database"] = inv_database
-    inv["type"] = inv_type
-    inv["code"] = inv_code
-    
-    # Make a deepcopy of the inventory dictionary
-    # Create the production inventory, which will be added to the exchanges
-    prod_inv = copy.deepcopy(inv)
-    prod_inv["amount"] = inv_amount / inv_allocation # !!! Check
-    prod_inv["type"] = "production"
-    prod_inv["allocation"] = inv_allocation * 100
-    prod_inv["SimaPro_categories"] = (SIMAPRO_PRODUCT_COMPARTMENTS["products"],)
-    prod_inv["input"] = (inv["database"], inv["code"])
-    
-    # Delete irrelevant key/value pairs of the production inventory dict
-    del prod_inv["production amount"]
-    del prod_inv["SimaPro_category_type"]
-    
-    # Create inventory exchanges and add the production inventory dictionary
-    inv["exchanges"] = [prod_inv] + inv_exchanges
-    
-    # Add additional items provided by kwargs to the inventory
-    for k, v in kwargs.items():
-        
-        # Evaluate, if existing key/value pair would be overwritten, in case key are named equally
-        if not overwrite_existing_key_value_pairs_with_kwargs and k in inv:
-            
-            # Throw error, if specified to NOT overwrite
-            raise ValueError("Key/value pair already exists in inventory. Problematic key: '" + str(k) + "'.\n\nEither set variable 'overwrite_existing_key_value_pairs_with_kwargs' to True or make sure to NOT pass the key/value pair again to the inventory.")
+
+    type: str | int | float = "undefined"
+    scale: float | None = None
+    shape: float | None = None
+    minimum: float | None = None
+    maximum: float | None = None
+    brightway_parameters: bool = False
+
+    @property
+    def type_name(self) -> str:
+        if isinstance(self.type, (int, float)) and not isinstance(self.type, bool):
+            reverse: dict[int, str] = {v: k for k, v in UNCERTAINTY_TYPES.items()}
+            if reverse.get(self.type) is None:
+                raise ValueError("Uncertainty type '" + str(self.type) + "' needs to be one of the following numbers --> " + str(list(reverse)) + ". Otherwise, it can not be mapped properly.")
+            return reverse[int(self.type)]
+        if self.type not in UNCERTAINTY_TYPES:
+            raise TypeError("Uncertainty type '" + str(self.type) + "' is not valid. Choose one from the list -->\n  - " + "\n  - ".join(UNCERTAINTY_TYPES))
+        return self.type
+
+    def to_dict(self, amount: float) -> dict:
+        """Brightway uncertainty fields ('uncertainty type', 'loc', 'scale', ...) for an exchange with ``amount``."""
+        name: str = self.type_name
+        number: int = UNCERTAINTY_TYPES[name]
+        if number > 5:
+            raise NotImplementedError("Uncertainty type '" + name + "' is not supported because it can not be used in Brightway LCA calculations.")
+
+        negative: bool | None = amount < 0 if number in (2, 3, 4, 5) else None
+        given: dict = {"negative": negative, "loc": amount, "scale": self.scale, "shape": self.shape,
+                       "minimum": self.minimum, "maximum": self.maximum}
+        missing: list[str] = [m for m in REQUIRED_UNCERTAINTY_FIELDS[name] if given[m] is None]
+        if missing:
+            raise TypeError("Uncertainty type '" + name + "' requires " + str(tuple(REQUIRED_UNCERTAINTY_FIELDS[name])) + " as input(s), but " + str(tuple(missing)) + " is/are not provided.")
+
+        if self.brightway_parameters:
+            params: dict = given
         else:
-            # Otherwise, overwrite
-            inv[k] = v
-    
-    return inv
+            params = {"negative": negative,
+                      "loc": math.log(abs(amount)) if number == 2 else amount,
+                      "scale": math.log(math.sqrt(self.scale)) if number == 2 else (math.sqrt(self.scale) if number == 3 else None),
+                      "shape": self.shape,
+                      "minimum": self.minimum,
+                      "maximum": self.maximum}
+            not_transformed: list[str] = [m for m in REQUIRED_UNCERTAINTY_FIELDS[name] if params[m] is None]
+            if not_transformed:
+                raise TypeError("Transformation of values for required fields " + str(tuple(not_transformed)) + " for uncertainty type '" + name + "' yielded None values/could not be done.")
 
-#%% Function 'create_base_exchange'
+        return {"uncertainty type": number, **{k: v for k, v in params.items() if v is not None}}
 
-# Read the docs 'stats_arrays' for uncertainty
-# https://stats-arrays.readthedocs.io/en/latest/
 
-uncertainty_type_mapping = {"undefined": 0,
-                            "no uncertainty": 1,
-                            "lognormal distr.": 2,
-                            "normal distr.": 3,
-                            "uniform distr.": 4,
-                            "triangular distr.": 5,
-                            "bernoulli distr.": 6,
-                            "discrete uniform": 7,
-                            "weibull": 8,
-                            "gamma": 9,
-                            "beta distr.": 10,
-                            "generalized extreme value": 11,
-                            "student's T": 12}
+@dataclass
+class Exchange:
+    """A technosphere, substitution or biosphere exchange.
 
-required = {"undefined": ["loc"],
-            "no uncertainty": ["loc"],
-            "lognormal distr.": ["negative", "loc", "scale"],
-            "normal distr.": ["negative", "loc", "scale"],
-            "uniform distr.": ["negative", "minimum", "maximum"],
-            "triangular distr.": ["negative", "minimum", "maximum"],
-            "bernoulli distr.": ["loc"],
-            "discrete uniform": ["maximum"],
-            "weibull": ["scale", "shape"],
-            "gamma": ["scale", "shape"],
-            "beta distr.": ["loc", "shape"],
-            "generalized extreme value": ["loc", "scale", "shape"],
-            "student's T": ["shape"]}
-
-# Function to be used to create valid Brightway2 exchanges
-def create_base_exchange(exc_name: str,
-                         exc_SimaPro_name: str,
-                         exc_cat: tuple,
-                         exc_SimaPro_cat: tuple,
-                         exc_unit: str,
-                         exc_SimaPro_unit: (str | None),
-                         exc_location: str,
-                         exc_amount: (float | int),
-                         exc_type: str,
-                         exc_database: (str | None) = None,
-                         exc_code: (str | None) = None,
-                         exc_uncertainty_type: (str | int | float) = "undefined",
-                         exc_uncertainty_taken_from_existing_inventory: bool = False,
-                         exc_scale: (int | float | None) = None,
-                         exc_shape: (int | float | None) = None,
-                         exc_minimum: (int | float | None) = None,
-                         exc_maximum: (int | float | None) = None,
-                         overwrite_existing_key_value_pairs_with_kwargs: bool = False,
-                         **kwargs: dict
-                         ):
+    If ``database`` and ``code`` are given, the exchange is linked to that activity/flow.
+    ``extra`` holds additional key/value pairs for the exchange dict. For technosphere and substitution exchanges,
+    ``simapro_categories`` must be a SimaPro compartment, unless ``validate_categories`` is False.
     """
-    Create a valid exchange dictionary for Brightway2
-    
-    # Read the docs 'stats_arrays' for uncertainty
-    # https://stats-arrays.readthedocs.io/en/latest/
-    
-    Documentation for uncertainty
-    "lognormal distr." and "normal distr.":
-        loc = mean deviation (μ), scale = standard deviation (σ)
-    
-    "bernoulli distr.":
-        loc = A one-row parameter array (p). If minimum and maximum are specified, p is not limited to 0 < p < 1, but instead to the interval (minimum, maximum)
-    
-    "weibull":
-        scale = lambda (λ), shape = k
-        
-    "gamma":
-        scale = theta (θ), shape = k
-    
-    "beta distr.":
-        loc = alpha (α), shape = beta (β)
-        
-    "generalized extreme value":
-        loc = mean deviation (μ), scale = standard deviation (σ), shape = epsilon (ξ)
-        
-    "student's T":
-        loc = mean deviation (μ), scale = standard deviation (σ), shape = degrees of freedom (ν)
-    
-    Parameters
-    ----------
-    exc_name : str
-        Exchange name.
-    
-    exc_SimaPro_name : str
-        Exchange name in SimaPro standard.    
 
-    exc_cat : tuple
-        Exchange category.
-        
-    exc_SimaPro_cat : tuple
-        Exchange category in SimaPro standard.
-        For technosphere flows, the following categories are possible, based on SimaPro standard: 'Materials/Fuels', 'Electricity/heat', 'Final waste flows', 'Waste to treatment'
-        For substitution flows, the following categories are possible, based on SimaPro standard: 'Avoided products'
+    name: str
+    simapro_name: str
+    categories: tuple
+    simapro_categories: tuple
+    unit: str
+    location: str
+    amount: float
+    type: str
+    simapro_unit: str | None = None
+    database: str | None = None
+    code: str | None = None
+    uncertainty: Uncertainty = field(default_factory=Uncertainty)
+    extra: dict = field(default_factory=dict)
+    allow_overwrite: bool = False
+    validate_categories: bool = True
 
-    exc_unit : str
-        Exchange unit.
-    
-    exc_SimaPro_unit : str | None
-        Exchange unit in SimaPro standard. If it is not provided, it will be tried to backward map the unit using the 'unit' field and the mapping from Brightway.  
-    
-    exc_location : str
-        Geography of the exchange.
-    
-    exc_amount : (float | int)
-        Exchange amount.
-    
-    exc_type : str
-        Exchange type. Needs to be either 'biosphere' or 'technosphere' or 'substitution'. Otherwise, a Value Error is raised.
+    def __post_init__(self) -> None:
+        if self.type not in EXCHANGE_TYPES:
+            raise ValueError("Exchange type has wrong value. Needs to be one of {} but is currently '{}'".format(EXCHANGE_TYPES, self.type))
 
-    exc_database : str, optional
-        Database to which exchange belongs to. If not specified (= None), no key will be printed to exchange dictionary. Default is None.
-    
-    exc_code : str, optional
-        Exchange ID/code. If not specified (= None), no key will be printed to exchange dictionary. Default is None.
-    
-    exc_uncertainty_type : (str | int | float), optional
-        Exchange uncertainty type.
-        Needs to be one of the following: 'undefined', 'no uncertainty', 'lognormal distr.', 'normal distr.', 'uniform distr.', 'triangular distr.', 'bernoulli distr.', 'discrete uniform', 'weibull', 'gamma', 'beta distr.', 'generalized extreme value', 'student's T'
-        Otherwise, a Type Error is raised. The default is 'undefined'.
-    
-    exc_uncertainty_taken_from_existing_inventory : bool, optional
-        Specifies whether the current values for scale, shape, minimum, maximum are taken from an existing inventory or if they were manually provided.
-        If set to True, values will be used as they are provided. If False, they will be adjusted accordingly.
-    
-    exc_scale : (int | float | None), optional
-        Exchange scale. Needed for certain uncertainty types. Have a look at the 'stats_arrays' documentation. The default is None (= not provided).
-    
-    exc_shape : (int | float | None), optional
-        Exchange shape. Needed for certain uncertainty types. Have a look at the 'stats_arrays' documentation. The default is None (= not provided).
-    
-    exc_minimum : (int | float | None), optional
-        Exchange minimum. Needed for certain uncertainty types. Have a look at the 'stats_arrays' documentation. The default is None (= not provided).
-    
-    exc_maximum : (int | float | None), optional
-        Exchange maximum. Needed for certain uncertainty types. Have a look at the 'stats_arrays' documentation. The default is None (= not provided).
-    
-    overwrite_existing_key_value_pairs_with_kwargs : bool, optional
-        Defines whether to check if key/value pairs would be overwritten by **kwargs if **kwargs are given as function inputs. The default is False.
-    
-    **kwargs : dict, optional
-        Additional key/value pairs to be passed to the exchange.
+    @classmethod
+    def from_activity(cls,
+                      database: str,
+                      code: str,
+                      type: str,
+                      amount: float,
+                      uncertainty: Uncertainty | None = None,
+                      extra: dict | None = None,
+                      allow_overwrite: bool = False) -> Self:
+        """Exchange linked to an existing activity of a registered database, taking name, unit, location etc. from it."""
+        ds = bw2data.Database(database).get(code)
+        return cls(name=ds["name"],
+                   simapro_name=ds["SimaPro_name"],
+                   categories=ds["SimaPro_categories"],
+                   simapro_categories=ds["SimaPro_categories"],
+                   unit=ds["unit"],
+                   location=ds["location"],
+                   amount=amount,
+                   type=type,
+                   simapro_unit=ds["SimaPro_unit"],
+                   database=database,
+                   code=code,
+                   uncertainty=Uncertainty() if uncertainty is None else uncertainty,
+                   extra={} if extra is None else extra,
+                   allow_overwrite=allow_overwrite,
+                   validate_categories=False)
 
-    Returns
-    -------
-    exc : dict
-        An exchange dictionary in valid Brightway2 format is returned.
+    def _validate_simapro_categories(self) -> None:
+        allowed: dict[str, list[tuple]] = {"technosphere": [(v,) for v in SIMAPRO_TECHNOSPHERE_COMPARTMENTS.values()],
+                                           "substitution": [(v,) for v in SIMAPRO_SUBSTITUTION_COMPARTMENTS.values()]}
+        if self.type in allowed and self.simapro_categories not in allowed[self.type]:
+            raise ValueError("The SimaPro category provided for the {} exchange can not be accepted because it does not match one of the baseline SimaPro categories.\n\nCurrent category: {}\nAccepted categories: {}".format(self.type, self.simapro_categories, allowed[self.type]))
 
+    def to_dict(self) -> dict:
+        """The exchange as a Brightway exchange dict."""
+        if self.validate_categories:
+            self._validate_simapro_categories()
+        exc: dict = {"name": self.name,
+                     "SimaPro_name": self.simapro_name,
+                     "type": self.type,
+                     "categories": self.categories,
+                     "SimaPro_categories": self.simapro_categories,
+                     "unit": self.unit,
+                     "SimaPro_unit": _simapro_unit(self.unit, self.simapro_unit, "simapro_unit"),
+                     "location": self.location,
+                     "amount": self.amount}
+        if self.database is not None and self.code is not None:
+            exc["input"] = (self.database, self.code)
+        exc |= self.uncertainty.to_dict(self.amount)
+        return _add_extra(exc, self.extra, self.allow_overwrite, "exchange")
+
+
+@dataclass
+class Inventory:
+    """An inventory (activity) with its production exchange and further exchanges.
+
+    ``amount`` is the output amount; with an ``allocation`` factor below 1, the production amount is
+    ``amount / allocation``. If ``categories`` is None, it is derived from ``simapro_category_type``.
+    ``extra`` holds additional key/value pairs for the inventory dict.
     """
-    
-    # Function input variable check
-    hp.check_function_input_type(create_base_exchange, locals())
-    
-    # Create a reversed uncertainty type mapping
-    reverse_uncertainty_type_mapping = {int(v): k for k, v in uncertainty_type_mapping.items()} 
-    
-    # Only biosphere, substitution and technosphere strings can be provided for type
-    if exc_type not in ["technosphere", "biosphere", "substitution"]:
-        raise ValueError("Exchange type has wrong value. Needs to be either 'biosphere' or 'technosphere' or 'substitution' but is currently '" + str(exc_type) + "'")
-    
-    # The only SimaPro categories which can be used for technosphere and substitution exchanges
-    # If categories other than those are used, an error is raised
-    SimaPro_substitution_cats = [(v,) for k, v in SIMAPRO_SUBSTITUTION_COMPARTMENTS.items()]
-    SimaPro_technosphere_cats = [(v,) for k, v in SIMAPRO_TECHNOSPHERE_COMPARTMENTS.items()]
-    
-    # Raise error if the category provided does not match one of the categories specified
-    if exc_type == "technosphere" and exc_SimaPro_cat not in SimaPro_technosphere_cats:
-        raise ValueError("The SimaPro_category provided for the technosphere exchange can not be accepted because it does not match one of the baseline SimaPro categories previously specified.\n\nCurrent category: " + str(exc_SimaPro_cat) + "\nAccepted categories: " + str(SimaPro_technosphere_cats))
-    
-    if exc_type == "substitution" and exc_SimaPro_cat not in SimaPro_substitution_cats:
-        raise ValueError("The category provided for the substitution exchange can not be accepted because it does not match one of the baseline SimaPro categories previously specified.\n\nCurrent category: " + str(exc_SimaPro_cat) + "\nAccepted categories: " + str(SimaPro_substitution_cats))    
 
-    # Check if the uncertainty type is of type float or int. If yes, we need to transform to str via the mapping file
-    if isinstance(exc_uncertainty_type, int | float):
-        
-        # Check if values are in the acceptable range of 0 to 12
-        if reverse_uncertainty_type_mapping.get(exc_uncertainty_type) is None:
-            raise ValueError("Uncertainty type '" + str(exc_uncertainty_type) + "' needs to be one of the following numbers --> " + str(list(reverse_uncertainty_type_mapping.keys())) + ". Otherwise, it can not be mapped properly.")
-        
-        # Transform uncertainty type to string via the mapping file
-        exc_uncertainty_type = reverse_uncertainty_type_mapping[int(exc_uncertainty_type)]
-        
-    # Current ID of the uncertainty type from mapping
-    current_uncertainty = uncertainty_type_mapping[exc_uncertainty_type]
+    name: str
+    simapro_name: str
+    simapro_category_type: str
+    unit: str
+    location: str
+    simapro_classification: tuple
+    amount: float
+    database: str
+    categories: tuple | None = None
+    simapro_unit: str | None = None
+    allocation: float = 1
+    type: str = "process"
+    code: str = field(default_factory=lambda: str(uuid.uuid4()))
+    exchanges: list[Exchange | dict] = field(default_factory=list)
+    extra: dict = field(default_factory=dict)
+    allow_overwrite: bool = False
 
-    # exc_loc, exc_scale, exc_shape, exc_minimum, exc_maximum
-    uncertainty_dict_orig = {"negative": exc_amount < 0 if current_uncertainty in [2, 3, 4, 5] else None,
-                             "loc": exc_amount,
-                             "scale": exc_scale,
-                             "shape": exc_shape,
-                             "minimum": exc_minimum,
-                             "maximum": exc_maximum}
-        
-    # Raise type error if given uncertainty type is not available in the mapping
-    if uncertainty_type_mapping.get(exc_uncertainty_type) is None:
-        raise TypeError("Uncertainty type (= variable 'exc_uncertainty_type') is not valid: '" + str(exc_uncertainty_type) + "'\nChoose one from the list -->\n- " + str("\n  - ".join(list(uncertainty_type_mapping.keys()))))
-    
-    # Raise error if the current uncertainty type is not yet implemented 1) in 'LCI_builder' because 2) it is not yet implemented in Brightway2
-    assert uncertainty_type_mapping[exc_uncertainty_type] <= 5, "Current uncertainty type '" + str(exc_uncertainty_type) + "' is not yet implemented in 'LCI_builder' because it is not yet implemented in Brightway and can not be used in LCA calculation."
-    
-    # Check if for given uncertainty type, all required fields are provided
-    not_available = [m for m in required[exc_uncertainty_type] if uncertainty_dict_orig[m] is None]
-    if not_available != []:
-        raise TypeError("Uncertainty type '" + str(exc_uncertainty_type) + "' requires " + str(tuple(required[exc_uncertainty_type])) + " as input(s), but " + str(tuple(not_available)) + " is/are not provided.")
-    
+    def __post_init__(self) -> None:
+        if self.amount <= 0:
+            raise ValueError("'amount' can not be 0 and can not be negative but is currently " + str(self.amount) + ".")
+        if self.allocation > 1 or self.allocation <= 0:
+            raise ValueError("'allocation' must be greater than 0 and smaller or equal to 1 but is currently '" + str(self.allocation) + "'.")
+        if self.simapro_category_type not in SIMAPRO_CATEGORY_TYPE_COMPARTMENT_MAPPING:
+            raise ValueError("Category type '" + self.simapro_category_type + "' is not accepted. It needs to be one of " + str(list(SIMAPRO_CATEGORY_TYPE_COMPARTMENT_MAPPING)))
 
-    
-    # Transform values if needed
-    if not exc_uncertainty_taken_from_existing_inventory:
-                
-        # Transform values
-        uncertainty_dict = {"negative": exc_amount < 0 if current_uncertainty in [2, 3, 4, 5] else None, 
-                            "loc": math.log(abs(exc_amount)) if current_uncertainty in [2] else exc_amount,
-                            "scale": math.log(math.sqrt(exc_scale)) if current_uncertainty in [2] else (math.sqrt(exc_scale) if current_uncertainty in [3] else None),
-                            "shape": exc_shape,
-                            "minimum": exc_minimum,
-                            "maximum": exc_maximum}
-        
-        # Check if for given uncertainty type, all values of required fields were transformed
-        not_transformed = [m for m in required[exc_uncertainty_type] if uncertainty_dict[m] is None]
-        if not_transformed != []:
-            raise TypeError("Transformation of values for required fields " + str(tuple(not_transformed)) + " for uncertainty type '" + str(exc_uncertainty_type) + " yielded None values/could not be done.")
-    
-    else:
-        # Create uncertainty dictionary
-        uncertainty_dict = {"negative": exc_amount < 0 if current_uncertainty in [2, 3, 4, 5] else None, 
-                            "loc": exc_amount,
-                            "scale": exc_scale,
-                            "shape": exc_shape,
-                            "minimum": exc_minimum,
-                            "maximum": exc_maximum}
-    
-    # Check if SimaPro unit is provided as function input
-    if exc_SimaPro_unit is None:
-        
-        # If not, map the unit given to the SimaPro standard
-        exc_SimaPro_unit_mapped = backward_unit_normalization_mapping.get(exc_unit)
-        
-        # If mapping has failed, raise error
-        if exc_SimaPro_unit_mapped is None:
-            raise ValueError("'exc_SimaPro_unit' could not be mapped from 'exc_unit'. Provide 'exc_SimaPro_unit' as function input (not using None).")
-    
-    
-    # Initialize empty dict for the exchange
-    exc = {}
-    
-    # Add information to exchange dictionary
-    exc["name"] = exc_name
-    exc["SimaPro_name"] = exc_SimaPro_name
-    exc["type"] = exc_type
-    exc["categories"] = exc_cat
-    exc["SimaPro_categories"] = exc_SimaPro_cat
-    exc["unit"] = exc_unit
-    exc["SimaPro_unit"] = exc_SimaPro_unit if exc_SimaPro_unit is not None else exc_SimaPro_unit_mapped 
-    exc["location"] = exc_location
-    exc["amount"] = exc_amount
+    def add_exchange(self, exchange: Exchange | dict) -> Self:
+        self.exchanges.append(exchange)
+        return self
 
-    # Write code and database parameters, but only if both exist (= not None)
-    if exc_database is not None and exc_code is not None:
-        exc["input"] = (exc_database, exc_code)        
-    
-    # Add uncertainty dictionary to the exchange
-    exc |= dict({"uncertainty type": uncertainty_type_mapping.get(exc_uncertainty_type)}, **{k: v for k, v in uncertainty_dict.items() if v is not None})
-    
-    # Add additional items provided by kwargs to the exchange
-    for k, v in kwargs.items():
-        
-        # Evaluate, if existing key/value pair would be overwritten, in case key are named equally
-        if not overwrite_existing_key_value_pairs_with_kwargs and k in exc:
-            
-            # Throw error, if specified to NOT overwrite
-            raise ValueError("Key/value pair already exists in exchange. Problematic key: '" + str(k) + "'.\n\nEither set variable 'overwrite_existing_key_value_pairs_with_kwargs' to True or make sure to NOT pass the key/value pair to the exchange via **kwargs.")
-        else:
-            # Otherwise, overwrite
-             exc[k] = v
-    
-    return exc
+    @property
+    def key(self) -> tuple[str, str]:
+        return (self.database, self.code)
 
+    def to_dict(self) -> dict:
+        """The inventory as a Brightway dataset dict, including its production exchange."""
+        compartment: str = SIMAPRO_CATEGORY_TYPE_COMPARTMENT_MAPPING[self.simapro_category_type]
+        inv: dict = {"name": self.name,
+                     "SimaPro_name": self.simapro_name,
+                     "categories": self.categories if self.categories is not None else (compartment,),
+                     "SimaPro_categories": (compartment,),
+                     "SimaPro_category_type": self.simapro_category_type,
+                     "unit": self.unit,
+                     "SimaPro_unit": _simapro_unit(self.unit, self.simapro_unit, "simapro_unit"),
+                     "location": self.location,
+                     "SimaPro_classification": self.simapro_classification,
+                     "production amount": self.amount / self.allocation,
+                     "output amount": self.amount,
+                     "allocation": self.allocation,
+                     "database": self.database,
+                     "type": self.type,
+                     "code": self.code}
 
+        production: dict = copy.deepcopy(inv)
+        production["amount"] = self.amount / self.allocation
+        production["type"] = "production"
+        production["allocation"] = self.allocation * 100
+        production["SimaPro_categories"] = (SIMAPRO_PRODUCT_COMPARTMENTS["products"],)
+        production["input"] = self.key
+        del production["production amount"]
+        del production["SimaPro_category_type"]
 
-
-
-
-# Function to be used to create valid Brightway2 exchanges
-def create_base_exchange_from_existing_inventory(inventory_database: str,
-                                                 inventory_code: str,
-                                                 exc_type: str,
-                                                 exc_amount: (int | float),
-                                                 exc_uncertainty_type: (str | int | float) = "undefined",
-                                                 exc_uncertainty_taken_from_existing_inventory: bool = False,
-                                                 exc_scale: (int | float | None) = None,
-                                                 exc_shape: (int | float | None) = None,
-                                                 exc_minimum: (int | float | None) = None,
-                                                 exc_maximum: (int | float | None) = None,
-                                                 overwrite_existing_key_value_pairs_with_kwargs: bool = False,
-                                                 **kwargs: dict
-                                                 ):
-    """
-    Create a valid exchange dictionary for Brightway2 from an existing, registered Brightway2 inventory.
-    
-    # Read the docs 'stats_arrays' for uncertainty
-    # https://stats-arrays.readthedocs.io/en/latest/
-    
-    Documentation for uncertainty
-    "lognormal distr." and "normal distr.":
-        loc = mean deviation (μ), scale = standard deviation (σ)
-    
-    "bernoulli distr.":
-        loc = A one-row parameter array (p). If minimum and maximum are specified, p is not limited to 0 < p < 1, but instead to the interval (minimum, maximum)
-    
-    "weibull":
-        scale = lambda (λ), shape = k
-        
-    "gamma":
-        scale = theta (θ), shape = k
-    
-    "beta distr.":
-        loc = alpha (α), shape = beta (β)
-        
-    "generalized extreme value":
-        loc = mean deviation (μ), scale = standard deviation (σ), shape = epsilon (ξ)
-        
-    "student's T":
-        loc = mean deviation (μ), scale = standard deviation (σ), shape = degrees of freedom (ν)
-    
-    Parameters
-    ----------
-    inventory_database : str
-        Database where the inventory for the exchange should be retrieved from.
-    
-    inventory_code : str
-        The code of the inventory that should be retrieved.
-    
-    exc_type : str
-        Exchange type. Needs to be either 'biosphere' or 'technosphere' or 'substitution'. Otherwise, a Value Error is raised.
-
-    exc_amount : (float | int)
-        Exchange amount.
-    
-    exc_uncertainty_type : (str | int | float), optional
-        Exchange uncertainty type.
-        Needs to be one of the following: 'undefined', 'no uncertainty', 'lognormal distr.', 'normal distr.', 'uniform distr.', 'triangular distr.', 'bernoulli distr.', 'discrete uniform', 'weibull', 'gamma', 'beta distr.', 'generalized extreme value', 'student's T'
-        Otherwise, a Type Error is raised. The default is 'undefined'.
-    
-    exc_uncertainty_taken_from_existing_inventory : bool, optional
-        Specifies whether the current values for scale, shape, minimum, maximum are taken from an existing inventory or if they were manually provided.
-        If set to True, values will be used as they are provided. If False, they will be adjusted accordingly.
-    
-    exc_scale : (int | float | None), optional
-        Exchange scale. Needed for certain uncertainty types. Have a look at the 'stats_arrays' documentation. The default is None (= not provided).
-    
-    exc_shape : (int | float | None), optional
-        Exchange shape. Needed for certain uncertainty types. Have a look at the 'stats_arrays' documentation. The default is None (= not provided).
-    
-    exc_minimum : (int | float | None), optional
-        Exchange minimum. Needed for certain uncertainty types. Have a look at the 'stats_arrays' documentation. The default is None (= not provided).
-    
-    exc_maximum : (int | float | None), optional
-        Exchange maximum. Needed for certain uncertainty types. Have a look at the 'stats_arrays' documentation. The default is None (= not provided).
-    
-    overwrite_existing_key_value_pairs_with_kwargs : bool, optional
-        Defines whether to check if key/value pairs would be overwritten by **kwargs if **kwargs are given as function inputs. The default is False.
-    
-    **kwargs : dict, optional
-        Additional key/value pairs to be passed to the exchange.
-
-    Returns
-    -------
-    exc : dict
-        An exchange dictionary in valid Brightway2 format is returned.
-
-    """
-    
-    # Function input variable check
-    hp.check_function_input_type(create_base_exchange, locals())
-    
-    # Create a reversed uncertainty type mapping
-    reverse_uncertainty_type_mapping = {int(v): k for k, v in uncertainty_type_mapping.items()} 
-    
-    # Only biosphere, substitution and technosphere strings can be provided for type
-    if exc_type not in ["technosphere", "biosphere", "substitution"]:
-        raise ValueError("Exchange type has wrong value. Needs to be either 'biosphere' or 'technosphere' or 'substitution' but is currently '" + str(exc_type) + "'")
-    
-    # The only SimaPro categories which can be used for technosphere and substitution exchanges
-    # If categories other than those are used, an error is raised
-    SimaPro_substitution_cats = [(v,) for k, v in SIMAPRO_SUBSTITUTION_COMPARTMENTS.items()]
-    SimaPro_technosphere_cats = [(v,) for k, v in SIMAPRO_TECHNOSPHERE_COMPARTMENTS.items()]
-
-    # Check if the uncertainty type is of type float or int. If yes, we need to transform to str via the mapping file
-    if isinstance(exc_uncertainty_type, int | float):
-        
-        # Check if values are in the acceptable range of 0 to 12
-        if reverse_uncertainty_type_mapping.get(exc_uncertainty_type) is None:
-            raise ValueError("Uncertainty type '" + str(exc_uncertainty_type) + "' needs to be one of the following numbers --> " + str(list(reverse_uncertainty_type_mapping.keys())) + ". Otherwise, it can not be mapped properly.")
-        
-        # Transform uncertainty type to string via the mapping file
-        exc_uncertainty_type = reverse_uncertainty_type_mapping[int(exc_uncertainty_type)]
-        
-    # Current ID of the uncertainty type from mapping
-    current_uncertainty = uncertainty_type_mapping[exc_uncertainty_type]
-
-    # exc_loc, exc_scale, exc_shape, exc_minimum, exc_maximum
-    uncertainty_dict_orig = {"negative": exc_amount < 0 if current_uncertainty in [2, 3, 4, 5] else None,
-                             "loc": exc_amount,
-                             "scale": exc_scale,
-                             "shape": exc_shape,
-                             "minimum": exc_minimum,
-                             "maximum": exc_maximum}
-        
-    # Raise type error if given uncertainty type is not available in the mapping
-    if uncertainty_type_mapping.get(exc_uncertainty_type) is None:
-        raise TypeError("Uncertainty type (= variable 'exc_uncertainty_type') is not valid: '" + str(exc_uncertainty_type) + "'\nChoose one from the list -->\n- " + str("\n  - ".join(list(uncertainty_type_mapping.keys()))))
-    
-    # Raise error if the current uncertainty type is not yet implemented 1) in 'LCI_builder' because 2) it is not yet implemented in Brightway2
-    assert uncertainty_type_mapping[exc_uncertainty_type] <= 5, "Current uncertainty type '" + str(exc_uncertainty_type) + "' is not yet implemented in 'LCI_builder' because it is not yet implemented in Brightway and can not be used in LCA calculation."
-    
-    # Check if for given uncertainty type, all required fields are provided
-    not_available = [m for m in required[exc_uncertainty_type] if uncertainty_dict_orig[m] is None]
-    if not_available != []:
-        raise TypeError("Uncertainty type '" + str(exc_uncertainty_type) + "' requires " + str(tuple(required[exc_uncertainty_type])) + " as input(s), but " + str(tuple(not_available)) + " is/are not provided.")
-    
-    # Transform values if needed
-    if not exc_uncertainty_taken_from_existing_inventory:
-                
-        # Transform values
-        uncertainty_dict = {"negative": exc_amount < 0 if current_uncertainty in [2, 3, 4, 5] else None, 
-                            "loc": math.log(abs(exc_amount)) if current_uncertainty in [2] else exc_amount,
-                            "scale": math.log(math.sqrt(exc_scale)) if current_uncertainty in [2] else (math.sqrt(exc_scale) if current_uncertainty in [3] else None),
-                            "shape": exc_shape,
-                            "minimum": exc_minimum,
-                            "naximum": exc_maximum}
-        
-        # Check if for given uncertainty type, all values of required fields were transformed
-        not_transformed = [m for m in required[exc_uncertainty_type] if uncertainty_dict[m] is None]
-        if not_transformed != []:
-            raise TypeError("Transformation of values for required fields " + str(tuple(not_transformed)) + " for uncertainty type '" + str(exc_uncertainty_type) + " yielded None values/could not be done.")
-    
-    else:
-        # Create uncertainty dictionary
-        uncertainty_dict = {"negative": exc_amount < 0 if current_uncertainty in [2, 3, 4, 5] else None, 
-                            "loc": exc_amount,
-                            "scale": exc_scale,
-                            "shape": exc_shape,
-                            "minimum": exc_minimum,
-                            "maximum": exc_maximum}
-    
-    # Retrieve information from existing inventory
-    ds = bw2data.Database(inventory_database).get(inventory_code)
-    
-    # Initialize empty dict for the exchange
-    exc = {}
-    
-    # Add information to exchange dictionary
-    exc["name"] = ds["name"]
-    exc["SimaPro_name"] = ds["SimaPro_name"]
-    exc["type"] = exc_type
-    exc["categories"] = ds["SimaPro_categories"]
-    exc["SimaPro_categories"] = ds["SimaPro_categories"]
-    exc["unit"] = ds["unit"]
-    exc["SimaPro_unit"] = ds["SimaPro_unit"]
-    exc["location"] = ds["location"]
-    exc["amount"] = exc_amount
-    exc["input"] = (inventory_database, inventory_code)
-    
-    # Add uncertainty dictionary to the exchange
-    exc |= dict({"uncertainty type": uncertainty_type_mapping.get(exc_uncertainty_type)}, **{k: v for k, v in uncertainty_dict.items() if v is not None})
-    
-    # Add additional items provided by kwargs to the exchange
-    for k, v in kwargs.items():
-        
-        # Evaluate, if existing key/value pair would be overwritten, in case key are named equally
-        if not overwrite_existing_key_value_pairs_with_kwargs and k in exc:
-            
-            # Throw error, if specified to NOT overwrite
-            raise ValueError("Key/value pair already exists in exchange. Problematic key: '" + str(k) + "'.\n\nEither set variable 'overwrite_existing_key_value_pairs_with_kwargs' to True or make sure to NOT pass the key/value pair to the exchange via **kwargs.")
-        else:
-            # Otherwise, overwrite
-             exc[k] = v
-    
-    return exc
-
+        inv["exchanges"] = [production] + [m.to_dict() if isinstance(m, Exchange) else m for m in self.exchanges]
+        return _add_extra(inv, self.extra, self.allow_overwrite, "inventory")

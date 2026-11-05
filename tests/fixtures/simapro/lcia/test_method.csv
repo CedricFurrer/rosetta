@@ -1,0 +1,66 @@
+{SimaPro 9.5.0.0}
+{methods}
+{Date: 05.11.2026}
+{Time: 12:00:00}
+{Project: rosetta test}
+{CSV Format version: 9.0.0}
+{CSV separator: Tab}
+{Decimal separator: .}
+{Date separator: .}
+{Short date format: dd.MM.yyyy}
+
+Method
+
+Name
+Test method
+
+Version
+1;0
+
+Comment
+Synthetic method for tests
+
+Category
+Others
+
+Use Damage Assessment
+No
+
+Use Normalization
+No
+
+Use Weighting
+No
+
+Use Addition
+No
+
+Weighting unit
+Pt
+
+Impact category
+Climate change	kg CO2 eq
+
+Substances
+Air		Carbon dioxide, fossil	000124-38-9	1	kg
+Air		Methane	000074-82-8	28	kg
+Air		Methane, biogenic		27	kg
+Air		Dinitrogen monoxide	010024-97-2	273	kg
+
+Impact category
+Acidification	mol H+ eq
+
+Substances
+Air		Ammonia	007664-41-7	3	kg
+Air		Ammonia, CH	007664-41-7	2.5	kg
+Air		Sulfur dioxide	007446-09-5	1.3	kg
+
+Impact category
+Resources	kg oil eq
+
+Substances
+Raw	in ground	Oil, crude		1	kg
+Raw	in water	Water, river		0	m3
+
+End
+

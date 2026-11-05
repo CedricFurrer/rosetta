@@ -1,15 +1,24 @@
-import os
+"""Export registered Brightway activities to SimaPro CSV.
+
+The export only works for data that was imported with rosetta and follows the SimaPro nomenclature.
+
+    exporter = SimaProCSVExporter()
+    exporter.export([bw2data.get_activity(key) for key in keys], folder=output_dir, filename="my_export")
+"""
+
+import datetime
 import pathlib
+from collections.abc import Iterable
+from dataclasses import dataclass
 
 import bw2data
-import datetime
 import numpy as np
-from . import helper as hp
+
+from . import _helpers as hp
 from .defaults.compartments import (SIMAPRO_COMPARTMENTS,
                                    SIMAPRO_COMPARTMENT_ORDER)
 
 #%% Local path
-here: pathlib.Path = pathlib.Path(__file__).parent
 
 #%% Create reverse SimaPro normalization mappings for units and categories
 
@@ -23,11 +32,12 @@ uncertainty_normalization_mapping: dict = {0: {"name": "Undefined", "params": []
 
 #%% Function to create a SimaPro CSV string from a Peewee object
 
-def export_SimaPro_CSV_from_Peewee(Brightway2_Peewee_object: bw2data.backends.peewee.proxies.Activity,
-                                   separator: str = "\t"):
+def activity_to_simapro_csv(Brightway2_Peewee_object: bw2data.backends.peewee.proxies.Activity,
+                            separator: str = "\t") -> str:
+    """SimaPro CSV block of a single registered Brightway activity."""
     
     # Check function input types
-    hp.check_function_input_type(export_SimaPro_CSV_from_Peewee, locals())
+    hp.check_function_input_type(activity_to_simapro_csv, locals())
     
     # Initialise dictionary to store final information
     compartment_dict = {}
@@ -616,142 +626,73 @@ def export_SimaPro_CSV_from_Peewee(Brightway2_Peewee_object: bw2data.backends.pe
     return final_string
 
 
-#%% Function to create a SimaPro CSV file from a list of Peewee objects
-
-def export_SimaPro_CSV(list_of_Brightway2_pewee_objects: list,
-                       folder_path_SimaPro_CSV: str | pathlib.Path | None = None,
-                       file_name_SimaPro_CSV_without_ending: str | None = None,
-                       file_name_print_timestamp: bool = True,
-                       separator: str = "\t",
-                       avoid_exporting_inventories_twice: bool = True,
-                       csv_format_version: str = "7.0.0",
-                       decimal_separator: str = ".",
-                       date_separator: str = ".",
-                       short_date_format: str = "dd.MM.yyyy"):
-    
-    # Check function input types
-    hp.check_function_input_type(export_SimaPro_CSV, locals())
-    
-    # Create a path if not provided by the function
-    # If not provided, the local Brightway2 folder will be used to save results
-    if folder_path_SimaPro_CSV is None:
-        folder_path_SimaPro_CSV = bw2data.projects.output_dir
-    
-    # Extract current time
-    current_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    
-    # Create filename if not provided
-    if file_name_SimaPro_CSV_without_ending is None:
-        
-        # Either use or do not use the timestamp in the filename
-        # depending on how specified in the function input
-        if file_name_print_timestamp:
-            
-            # Give file name
-            filename = current_time + "_SimaPro_CSV"
-            
-        else:
-            # Give file name
-            filename = "SimaPro_CSV"
-    
-    else:
-        # The same as above
-        if file_name_print_timestamp:
-            
-            # Give file name
-            filename = current_time + "_" + file_name_SimaPro_CSV_without_ending
-            
-        else:
-            # Give filename
-            filename = file_name_SimaPro_CSV_without_ending
-    
-    
-    # Mapping of the delimiter to SimaPro name convention
-    SimaPro_delimiter_mapping = {"\t": "Tab",
-                                 ";": "Semicolon"}
-    
-    # Raise error if mapping was unsuccessful
-    if SimaPro_delimiter_mapping.get(separator) is None:
-        raise ValueError("The separator specified '" + str(separator) + "' could not be mapped to SimaPro name convention. Add to the mapping dictionary.")
-    
-    # Names of the starting block 
-    csv_separator_name = "CSV separator"
-    csv_format_version_name = "CSV Format version" 
-    decimal_separator_name = "Decimal separator"
-    date_separator_name = "Date separator"
-    short_date_format_name = "Short date format"
-    
-    # Starting block dictionary --> information needed for the starting block 
-    starting_block = {csv_separator_name: SimaPro_delimiter_mapping[separator],
-                      csv_format_version_name: csv_format_version,
-                      decimal_separator_name: decimal_separator,
-                      date_separator_name: date_separator,
-                      short_date_format_name: short_date_format}
-    
-    # Create the starting block string
-    starting_block_string = "\n".join(["{" + str(k) + ": " + str(v) + "}" for k, v in starting_block.items()])
-    
-    # Initialise a list, to store all inventory strings which will be exported
-    inv_strings = []
-    
-    # Initialize a dictionary to store already exported SimaPro names
-    already_exported = {}
-    
-    # Loop through each Brightway2 inventory
-    for obj in list_of_Brightway2_pewee_objects:
-        
-        # SimaPro does not accept inventories with the exact same name. In case we would export the inventory twice, we exclude it so that it is only exported once.
-        if avoid_exporting_inventories_twice and obj["SimaPro_name"] in already_exported:
-            
-            if already_exported[obj["SimaPro_name"]] != (obj["database"], obj["code"]):
-                print(already_exported[obj["SimaPro_name"]])
-                print((obj["database"], obj["code"]))
-                raise ValueError("The SimaPro name '" + obj["SimaPro_name"] + "' is used in different databases. SimaPro does not allow inventories with the same SimaPro name. Thus, the inventory can not be exported twice although it might be different in inputs, outputs, emissions. Make sure to either provide different inventory names or to export only one of the inventories.")
-
-            
-            # # We have a problem and need to raise an error, in case we use the same SimaPro name for different inventories from different databases
-            # # For additional evaluation, we check duplicated SimaPro names, if they are coming from the same databases and have the same code
-            # # If yes, then it is ok. Otherwise, we have a problem and potentially export two inventories with the same name but different inputs, outputs, emissions. In that case, we raise an error.
-            # if (obj["database"], obj["code"]) not in already_exported[obj["SimaPro_name"]]:
-            #     raise ValueError("The SimaPro name '" + obj["SimaPro_name"] + "' is used in different databases. SimaPro does not allow inventories with the same SimaPro name. Thus, the inventory can not be exported twice although it might be different in inputs, outputs, emissions. Make sure to either provide different inventory names or to export only one of the inventories.")
-            
-            continue
-        
-        # Extract the SimaPro specific string of the current inventory and add to list
-        inv_strings += [export_SimaPro_CSV_from_Peewee(obj, separator)]
-        
-        # If we specified to not export inventories twice, write the current SimaPro name to the dictionary so that it is omitted (and not exported) in case it would appear once more again.
-        if avoid_exporting_inventories_twice:
-            
-            already_exported[obj["SimaPro_name"]] = (obj["database"], obj["code"])
-            
-            # # We add the database and the code of the inventory to the dictionary together with the SimaPro name
-            # if obj["SimaPro_name"] in already_exported:
-                
-            #     # Add tuple to list if key is already there
-            #     already_exported[obj["SimaPro_name"]] += [(obj["database"], obj["code"])]
-            
-            # else:
-            #     # Otherwise initialize a new key with a new list containing the tuple
-            #     already_exported[obj["SimaPro_name"]] = [(obj["database"], obj["code"])]
-    
-    # Combine all the inventory strings to one string
-    inv_string = "\n\n".join(inv_strings)
-    
-    # Add the starting block of the SimaPro CSV file to the inventory string
-    final_string = "\n\n".join([starting_block_string, inv_string])
-    
-    # Write to file
-    f = open(os.path.join(str(folder_path_SimaPro_CSV), filename + ".csv"), "x", encoding = "utf-8")
-    f.write(final_string)
-    f.close()
-    
-    # Print file path to console
-    print(str(os.path.join(str(folder_path_SimaPro_CSV), filename + ".csv")))
-    
-    return final_string
+SIMAPRO_DELIMITER_NAMES: dict[str, str] = {"\t": "Tab", ";": "Semicolon"}
 
 
+@dataclass
+class SimaProCSVExporter:
+    """Export registered Brightway activities to a SimaPro CSV file.
 
+    Parameters
+    ----------
+    separator
+        CSV separator; tab or semicolon.
+    avoid_duplicates
+        Export each SimaPro name only once. Raises an error if the same SimaPro name is used by
+        activities of different databases (SimaPro does not allow duplicate names).
+    csv_format_version, decimal_separator, date_separator, short_date_format
+        Values written to the SimaPro CSV header.
+    """
 
+    separator: str = "\t"
+    avoid_duplicates: bool = True
+    csv_format_version: str = "7.0.0"
+    decimal_separator: str = "."
+    date_separator: str = "."
+    short_date_format: str = "dd.MM.yyyy"
 
+    def __post_init__(self) -> None:
+        if self.separator not in SIMAPRO_DELIMITER_NAMES:
+            raise ValueError("The separator specified '" + str(self.separator) + "' could not be mapped to SimaPro name convention. Use one of " + str(list(SIMAPRO_DELIMITER_NAMES)) + ".")
+
+    @property
+    def header(self) -> str:
+        header: dict = {"CSV separator": SIMAPRO_DELIMITER_NAMES[self.separator],
+                        "CSV Format version": self.csv_format_version,
+                        "Decimal separator": self.decimal_separator,
+                        "Date separator": self.date_separator,
+                        "Short date format": self.short_date_format}
+        return "\n".join(["{" + str(k) + ": " + str(v) + "}" for k, v in header.items()])
+
+    def to_string(self, activities: Iterable[bw2data.backends.peewee.proxies.Activity]) -> str:
+        """The SimaPro CSV content for ``activities``."""
+        blocks: list[str] = []
+        already_exported: dict = {}
+        for obj in activities:
+            if self.avoid_duplicates and obj["SimaPro_name"] in already_exported:
+                if already_exported[obj["SimaPro_name"]] != (obj["database"], obj["code"]):
+                    raise ValueError("The SimaPro name '" + obj["SimaPro_name"] + "' is used in different databases " + str([already_exported[obj["SimaPro_name"]], (obj["database"], obj["code"])]) + ". SimaPro does not allow inventories with the same SimaPro name. Make sure to either provide different inventory names or to export only one of the inventories.")
+                continue
+            blocks += [activity_to_simapro_csv(obj, self.separator)]
+            if self.avoid_duplicates:
+                already_exported[obj["SimaPro_name"]] = (obj["database"], obj["code"])
+        return "\n\n".join([self.header, "\n\n".join(blocks)])
+
+    def export(self,
+               activities: Iterable[bw2data.backends.peewee.proxies.Activity],
+               folder: pathlib.Path | str | None = None,
+               filename: str = "SimaPro_CSV",
+               timestamp: bool = True) -> pathlib.Path:
+        """Write ``activities`` to a new SimaPro CSV file and return its path.
+
+        The file is written to ``folder`` (default: the project's output directory) as ``<filename>.csv``,
+        prefixed with the current date and time if ``timestamp`` is True. Existing files are never overwritten.
+        """
+        folder_path: pathlib.Path = pathlib.Path(bw2data.projects.output_dir if folder is None else folder)
+        if timestamp:
+            filename = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + "_" + filename
+        filepath: pathlib.Path = folder_path / (filename + ".csv")
+        with open(filepath, "x", encoding="utf-8") as file:
+            file.write(self.to_string(activities))
+        print(str(filepath))
+        return filepath

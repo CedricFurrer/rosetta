@@ -1,4 +1,4 @@
-__version_info__: tuple = (1, 0, 1)
+__version_info__: tuple = (2, 0, 0)
 __version__: str = ".".join(str(m) for m in __version_info__)
 
 # Works with the following packages and versions

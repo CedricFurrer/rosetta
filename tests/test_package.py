@@ -6,23 +6,26 @@ import pytest
 import rosetta
 
 MODULES = [
-    "rosetta.helper",
+    "rosetta.builder",
+    "rosetta.calculation",
     "rosetta.defaults.categories",
     "rosetta.defaults.compartments",
     "rosetta.defaults.locations",
     "rosetta.defaults.model_type",
     "rosetta.defaults.units",
-    "rosetta.utils",
-    "rosetta.link",
-    "rosetta.lcia",
-    "rosetta.lci",
-    "rosetta.builder",
     "rosetta.exporter",
-    "rosetta.calculation",
     "rosetta.harmonization",
-    "rosetta.activity_harmonization",
-    "rosetta.biosphere_harmonization",
-    "rosetta.correspondence.correspondence",
+    "rosetta.harmonization.activity",
+    "rosetta.harmonization.biosphere",
+    "rosetta.harmonization.correspondence",
+    "rosetta.harmonization.flows",
+    "rosetta.harmonization.sbert",
+    "rosetta.importers",
+    "rosetta.linking",
+    "rosetta.methods",
+    "rosetta.migration",
+    "rosetta.project",
+    "rosetta.strategies",
 ]
 
 
@@ -35,8 +38,14 @@ def test_module_imports(name):
     importlib.import_module(name)
 
 
-def test_lazy_submodule_access():
-    assert rosetta.lci is importlib.import_module("rosetta.lci")
+@pytest.mark.parametrize("name", sorted(rosetta._EXPORTS))
+def test_public_names(name):
+    assert getattr(rosetta, name).__name__ == name
+
+
+def test_unknown_attribute():
+    with pytest.raises(AttributeError):
+        rosetta.does_not_exist
 
 
 def test_package_data_shipped():

@@ -1,11 +1,14 @@
 import torch
 import pathlib
-from . import helper as hp
+from .. import _helpers as hp
 from dataclasses import asdict
 from pydantic import field_validator
 from pydantic.dataclasses import dataclass
 from typing import Optional, Callable
-from sentence_transformers import SentenceTransformer, util
+from sentence_transformers import util
+
+from .._paths import SBERT_MODEL_DIR
+from .sbert import default_device, load_sbert_model
 
 @dataclass(frozen = True)
 class BiosphereDefinition:
@@ -115,7 +118,7 @@ def get_SBERT_options(bio: BiosphereDefinition) -> tuple[str]:
         
 
         
-DEFAULT_PATH_TO_SBERT_MODEL: pathlib.Path = pathlib.Path(__file__).parent / "defaults" / "all-MiniLM-L6-v2"
+DEFAULT_PATH_TO_SBERT_MODEL: pathlib.Path = SBERT_MODEL_DIR
 
 class BiosphereHarmonization:
     
@@ -300,13 +303,7 @@ class BiosphereHarmonization:
         if self._mapping_type_direct not in self._source_definitions:
             return ()
         
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-
-        # Load SBERT model
-        if path_to_model is not None and path_to_model.exists():
-            model = SentenceTransformer(str(path_to_model), device = device)
-        else:
-            model = SentenceTransformer("all-MiniLM-L6-v2", device = device)
+        model = load_sbert_model(path_to_model, device = default_device())
                 
         if self._encoded_TOs is None:
             self._TOs_prepared: tuple = ()

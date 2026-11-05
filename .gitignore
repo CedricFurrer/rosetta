@@ -91,3 +91,8 @@ build/
 dist/
 *.egg-info/
 src/rosetta/UUIDs.xlsx
+
+# Test fixtures (small synthetic files) #
+########################################
+!tests/fixtures/**/*.csv
+!tests/fixtures/**/*.xlsx

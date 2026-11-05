@@ -5,26 +5,14 @@ if __name__ == "__main__":
     import os
     os.chdir(here.parent)
 
-import copy
 import json
-from rosetta import utils
-import bw2io
 import bw2data
-from rosetta import link
 from  datetime import datetime
-from functools import partial
-from rosetta.lcia import (import_SimaPro_LCIA_methods,
-                  add_excluded_longterm_method,
-                  register_biosphere,
-                  register_SimaPro_LCIA_methods,
-                  write_biosphere_flows_and_method_names_to_XLSX)
-
-from rosetta.lci import (import_SimaPro_LCI_inventories,
-                 migrate_from_excel_file,
-                 select_inventory_using_regex)
-
-from rosetta.utils import (change_brightway_project_directory,
-                   change_database_name)
+from rosetta import (BrightwayProject,
+                     SimaProLCIImporter,
+                     SimaProLCIAImporter,
+                     LCIImporter)
+from rosetta.methods import add_excluded_longterm_method
 
 
 #%% File- and folderpaths, key variables
@@ -46,7 +34,7 @@ if bw2data.__version__[0] >= 4:
     project_path: pathlib.Path = here.parent.parent  / "Brightway2.5_projects"
 else:
     project_path: pathlib.Path = here.parent.parent / "Brightway2_projects"
-    
+
 project_path.mkdir(exist_ok = True)
 
 print("\nWrite the name of your project here and press Enter:")
@@ -57,20 +45,14 @@ project_name: str = input() # "LCI and LCIA from SimaPro"
 print("\n")
 
 #%% Change brightway project directory and setup project
-change_brightway_project_directory(project_path)
-
-# If project already exists, raise error
-if project_name in bw2data.projects:
-    raise ValueError("Project '{}' already exists and does not need any setup.".format(project_name))
-    # bw2data.projects.delete_project(project_name)
-    # list(bw2data.projects)
-
-# Set project
-bw2data.projects.set_current(project_name)
+# Set project (if project already exists, raise error)
+project: BrightwayProject = BrightwayProject(project_name, directory = project_path, new = True)
+# bw2data.projects.delete_project(project_name)
+# list(bw2data.projects)
 
 #%% File- and folderpaths
 # Setup output path
-output_path: pathlib.Path = pathlib.Path(bw2data.projects.output_dir)
+output_path: pathlib.Path = project.output_dir
 
 #%% Defaults for key variables
 biosphere_db_name_simapro: str = "biosphere3 - from SimaPro"
@@ -84,32 +66,20 @@ fooddk_db_name_simapro: str = "LCA Food DK - SimaPro"
 esu_db_name_simapro: str = "ESU Services - SimaPro - regionalized (SimaPro background ecoinvent v3.11)"
 
 #%% Import SimaPro LCIA methods and create SimaPro biosphere database
-methods: list[dict] = import_SimaPro_LCIA_methods(path_to_SimaPro_CSV_LCIA_files = LCIA_SimaPro_CSV_folderpath,
-                                                  encoding = "latin-1",
-                                                  delimiter = "\t",
-                                                  verbose = True)
+methods: SimaProLCIAImporter = SimaProLCIAImporter(LCIA_SimaPro_CSV_folderpath,
+                                                   encoding = "latin-1",
+                                                   delimiter = "\t")
 
-register_biosphere(Brightway_project_name = project_name,
-                   BRIGHTWAY2_DIR = project_path,
-                   biosphere_db_name = biosphere_db_name_simapro,
-                   imported_methods = methods,
-                   verbose = True)
+methods.write_biosphere(biosphere_db_name_simapro)
 
-register_SimaPro_LCIA_methods(imported_methods = methods,
-                              biosphere_db_name = biosphere_db_name_simapro,
-                              Brightway_project_name = project_name,
-                              BRIGHTWAY2_DIR = project_path,
-                              logs_output_path = output_path,
-                              verbose = True)
+methods.write_methods(biosphere_db_name_simapro, logs_dir = output_path)
 
 SALCA_method_names: list[tuple] = [m for m in bw2data.methods if "SALCA" in m[0] and "no LT" not in m]
 add_excluded_longterm_method(original_method = SALCA_method_names,
                              method_string_to_be_added = "no LT",
                              verbose = True)
 
-write_biosphere_flows_and_method_names_to_XLSX(biosphere_db_name = biosphere_db_name_simapro,
-                                               output_path = output_path,
-                                               verbose = True)
+project.export_overview(biosphere_db_name_simapro, output_path)
 
 #%% Create JSON files containing biosphere flow data
 
@@ -125,161 +95,83 @@ with open(output_path / ("biosphere_flows_from_SimaPro.json"), "w") as outfile:
 
 
 #%% Import LCA Food DK database from SimaPro
-fooddk_db_simapro: bw2io.importers.base_lci.LCIImporter = import_SimaPro_LCI_inventories(SimaPro_CSV_LCI_filepaths = [LCI_fooddk_simapro_folderpath / "FoodDK.CSV"],
-                                                                                         db_name = fooddk_db_name_simapro,
-                                                                                         encoding = "latin-1",
-                                                                                         delimiter = "\t",
-                                                                                         verbose = True)
+fooddk_db_simapro: SimaProLCIImporter = SimaProLCIImporter(LCI_fooddk_simapro_folderpath / "FoodDK.CSV",
+                                                           fooddk_db_name_simapro,
+                                                           encoding = "latin-1",
+                                                           delimiter = "\t")
 
-fooddk_db_simapro.apply_strategy(partial(link.link_biosphere_flows_externally,
-                                         biosphere_db_name = biosphere_db_name_simapro,
-                                         biosphere_db_name_unlinked = unlinked_biosphere_db_name,
-                                         other_biosphere_databases = None,
-                                         linking_order = None,
-                                         relink = False,
-                                         strip = True,
-                                         case_insensitive = True,
-                                         remove_special_characters = False,
-                                         verbose = True), verbose = True)
+fooddk_db_simapro.link_biosphere(biosphere_db_name_simapro, unlinked_biosphere_db_name, relink = False)
 
-fooddk_db_simapro.apply_strategy(partial(migrate_from_excel_file,
-                                         excel_migration_filepath = LCI_fooddk_simapro_folderpath / "custom_migration_FoodDK.xlsx",
-                                         migrate_activities = False,
-                                         migrate_exchanges = True),
-                                         verbose = True)
+fooddk_db_simapro.migrate(LCI_fooddk_simapro_folderpath / "custom_migration_FoodDK.xlsx")
 
-fooddk_db_simapro.apply_strategy(partial(link.link_activities_internally,
-                                         production_exchanges = True,
-                                         substitution_exchanges = True,
-                                         technosphere_exchanges = True,
-                                         relink = False,
-                                         strip = True,
-                                         case_insensitive = True,
-                                         remove_special_characters = False,
-                                         verbose = True), verbose = True)
+fooddk_db_simapro.link_internally()
 
 print("\n------- Statistics")
 fooddk_db_simapro.statistics()
 
 # Make a new biosphere database for the flows which are currently not linked
 # Add unlinked biosphere flows with a custom function
-utils.add_unlinked_flows_to_biosphere_database(db = fooddk_db_simapro,
-                                               biosphere_db_name_unlinked = unlinked_biosphere_db_name,
-                                               biosphere_db_name = biosphere_db_name_simapro,
-                                               verbose = True)
+fooddk_db_simapro.add_unlinked_to_biosphere(unlinked_biosphere_db_name, biosphere_db_name_simapro)
 print("\n------- Statistics")
 fooddk_db_simapro.statistics()
 
 # Delete lca food dk database if already existing
-if fooddk_db_name_simapro in bw2data.databases:
-    print("\n------- Delete database: " + fooddk_db_name_simapro)
-    del bw2data.databases[fooddk_db_name_simapro]
-
 # Write database
-print("\n------- Write database: " + wfldb_db_name_simapro)
-fooddk_db_simapro.write_database()
+fooddk_db_simapro.write(overwrite = True)
 
 # Free up memory
 del fooddk_db_simapro
 
 
 #%% Import ESU Services database from SimaPro
-esu_db_simapro: bw2io.importers.base_lci.LCIImporter = import_SimaPro_LCI_inventories(SimaPro_CSV_LCI_filepaths = [LCI_esu_simapro_folderpath / "ESU.csv"],
-                                                                                      db_name = esu_db_name_simapro,
-                                                                                      encoding = "latin-1",
-                                                                                      delimiter = "\t",
-                                                                                      verbose = True)
+esu_db_simapro: SimaProLCIImporter = SimaProLCIImporter(LCI_esu_simapro_folderpath / "ESU.csv",
+                                                        esu_db_name_simapro,
+                                                        encoding = "latin-1",
+                                                        delimiter = "\t")
 
-esu_db_simapro.apply_strategy(partial(link.link_biosphere_flows_externally,
-                                      biosphere_db_name = biosphere_db_name_simapro,
-                                      biosphere_db_name_unlinked = unlinked_biosphere_db_name,
-                                      other_biosphere_databases = None,
-                                      linking_order = None,
-                                      relink = False,
-                                      strip = True,
-                                      case_insensitive = True,
-                                      remove_special_characters = False,
-                                      verbose = True), verbose = True)
+esu_db_simapro.link_biosphere(biosphere_db_name_simapro, unlinked_biosphere_db_name, relink = False)
 
-esu_db_simapro.apply_strategy(partial(migrate_from_excel_file,
-                                      excel_migration_filepath = LCI_esu_simapro_folderpath / "custom_migration_ESU.xlsx",
-                                      migrate_activities = False,
-                                      migrate_exchanges = True),
-                              verbose = True)
+esu_db_simapro.migrate(LCI_esu_simapro_folderpath / "custom_migration_ESU.xlsx")
 
-esu_db_simapro.apply_strategy(partial(link.link_activities_internally,
-                                      production_exchanges = True,
-                                      substitution_exchanges = True,
-                                      technosphere_exchanges = True,
-                                      relink = False,
-                                      strip = True,
-                                      case_insensitive = True,
-                                      remove_special_characters = False,
-                                      verbose = True), verbose = True)
+esu_db_simapro.link_internally()
 
 print("\n------- Statistics")
 esu_db_simapro.statistics()
 
 # Make a new biosphere database for the flows which are currently not linked
 # Add unlinked biosphere flows with a custom function
-utils.add_unlinked_flows_to_biosphere_database(db = esu_db_simapro,
-                                               biosphere_db_name_unlinked = unlinked_biosphere_db_name,
-                                               biosphere_db_name = biosphere_db_name_simapro,
-                                               verbose = True)
+esu_db_simapro.add_unlinked_to_biosphere(unlinked_biosphere_db_name, biosphere_db_name_simapro)
 print("\n------- Statistics")
 esu_db_simapro.statistics()
 
 # Delete lca food dk database if already existing
-if esu_db_name_simapro in bw2data.databases:
-    print("\n------- Delete database: " + esu_db_name_simapro)
-    del bw2data.databases[esu_db_name_simapro]
-
 # Write database
-print("\n------- Write database: " + esu_db_name_simapro)
-esu_db_simapro.write_database()
+esu_db_simapro.write(overwrite = True)
 
 # Free up memory
 del esu_db_simapro
 
 
 #%% Import the original ecoinvent database extract from SimaPro
-original_ecoinvent_db_simapro: bw2io.importers.base_lci.LCIImporter = import_SimaPro_LCI_inventories(SimaPro_CSV_LCI_filepaths = [LCI_ecoinvent_simapro_folderpath / "ECO.CSV"],
-                                                                                                     db_name = ecoinvent_db_name_simapro,
-                                                                                                     encoding = "latin-1",
-                                                                                                     delimiter = "\t",
-                                                                                                     verbose = True)
+original_ecoinvent_db_simapro: SimaProLCIImporter = SimaProLCIImporter(LCI_ecoinvent_simapro_folderpath / "ECO.CSV",
+                                                                       ecoinvent_db_name_simapro,
+                                                                       encoding = "latin-1",
+                                                                       delimiter = "\t")
 
-original_ecoinvent_db_simapro.apply_strategy(partial(migrate_from_excel_file,
-                                                     excel_migration_filepath = LCI_ecoinvent_simapro_folderpath / "custom_migration_ECO.xlsx",
-                                                     migrate_activities = False,
-                                                     migrate_exchanges = True),
-                                             verbose = True)
+original_ecoinvent_db_simapro.migrate(LCI_ecoinvent_simapro_folderpath / "custom_migration_ECO.xlsx")
 
 # Remove linking
-original_ecoinvent_db_simapro.apply_strategy(partial(link.remove_linking,
-                                                     production_exchanges = True,
-                                                     substitution_exchanges = True,
-                                                     technosphere_exchanges = True,
-                                                     biosphere_exchanges = True))
+original_ecoinvent_db_simapro.unlink(production = True,
+                                     substitution = True,
+                                     technosphere = True,
+                                     biosphere = True)
 
 # Link biosphere flows
-original_ecoinvent_db_simapro.apply_strategy(partial(link.link_biosphere_flows_externally,
-                                                     biosphere_db_name = biosphere_db_name_simapro,
-                                                     biosphere_db_name_unlinked = unlinked_biosphere_db_name,
-                                                     other_biosphere_databases = None,
-                                                     linking_order = None,
-                                                     relink = False,
-                                                     strip = True,
-                                                     case_insensitive = True,
-                                                     remove_special_characters = False,
-                                                     verbose = True), verbose = True)
+original_ecoinvent_db_simapro.link_biosphere(biosphere_db_name_simapro, unlinked_biosphere_db_name, relink = False)
 
 # Make a new biosphere database for the flows which are currently not linked
 # Add unlinked biosphere flows with a custom function
-utils.add_unlinked_flows_to_biosphere_database(db = original_ecoinvent_db_simapro,
-                                               biosphere_db_name_unlinked = unlinked_biosphere_db_name,
-                                               biosphere_db_name = biosphere_db_name_simapro,
-                                               verbose = True)
+original_ecoinvent_db_simapro.add_unlinked_to_biosphere(unlinked_biosphere_db_name, biosphere_db_name_simapro)
 
 print("\n------- Statistics")
 original_ecoinvent_db_simapro.statistics()
@@ -306,99 +198,44 @@ WFLDB_patterns: list[str] = ["WFLDB", # because why not finding WFLDB inventorie
                              ]
 
 #%% Import regionalized ecoinvent LCI database from SimaPro
-ecoinvent_db_simapro: bw2io.importers.base_lci.LCIImporter = bw2io.importers.base_lci.LCIImporter(ecoinvent_db_name_simapro)
+ecoinvent_db_simapro: LCIImporter = original_ecoinvent_db_simapro.select(SALCA_patterns + WFLDB_patterns,
+                                                                         exclude = True,
+                                                                         db_name = ecoinvent_db_name_simapro)
 
-
-ecoinvent_db_simapro.data: list[dict] = select_inventory_using_regex(db_var = copy.deepcopy(original_ecoinvent_db_simapro.data),
-                                                                     exclude = True,
-                                                                     include = False,
-                                                                     patterns = SALCA_patterns + WFLDB_patterns,
-                                                                     case_sensitive = True)
-
-
-ecoinvent_db_simapro.apply_strategy(partial(change_database_name,
-                                            new_db_name = ecoinvent_db_name_simapro,
-                                            ))         
-
-ecoinvent_db_simapro.apply_strategy(partial(link.link_activities_internally,
-                                            production_exchanges = True,
-                                            substitution_exchanges = True,
-                                            technosphere_exchanges = True,
-                                            relink = False,
-                                            strip = True,
-                                            case_insensitive = True,
-                                            remove_special_characters = False,
-                                            verbose = True), verbose = True)    
+ecoinvent_db_simapro.link_internally()
 
 print("\n------- Statistics")
 ecoinvent_db_simapro.statistics()
 
 # Delete ecoinvent database if already existing
-if ecoinvent_db_name_simapro in bw2data.databases:
-    print("\n------- Delete database: " + ecoinvent_db_name_simapro)
-    del bw2data.databases[ecoinvent_db_name_simapro]
-
 # Write database
-print("\n------- Write database: " + ecoinvent_db_name_simapro)
-ecoinvent_db_simapro.write_database()
+ecoinvent_db_simapro.write(overwrite = True)
 
 
 
 #%% Import WFLDB LCI database from SimaPro
-wfldb_db_simapro: bw2io.importers.base_lci.LCIImporter = bw2io.importers.base_lci.LCIImporter(wfldb_db_name_simapro)
-wfldb_db_simapro.data: list[dict] = select_inventory_using_regex(db_var = copy.deepcopy(original_ecoinvent_db_simapro.data),
-                                                                 exclude = False,
-                                                                 include = True,
-                                                                 patterns = WFLDB_patterns,
-                                                                 case_sensitive = True)
+wfldb_db_simapro: LCIImporter = original_ecoinvent_db_simapro.select(WFLDB_patterns,
+                                                                     exclude = False,
+                                                                     db_name = wfldb_db_name_simapro)
 
-wfldb_db_simapro.data += import_SimaPro_LCI_inventories(SimaPro_CSV_LCI_filepaths = [LCI_wfldb_simapro_folderpath / "WFLDB.CSV"],
-                                                        db_name = wfldb_db_name_simapro,
-                                                        encoding = "latin-1",
-                                                        delimiter = "\t",
-                                                        verbose = True)
+wfldb_db_simapro.extend(SimaProLCIImporter(LCI_wfldb_simapro_folderpath / "WFLDB.CSV",
+                                           wfldb_db_name_simapro,
+                                           encoding = "latin-1",
+                                           delimiter = "\t"))
 
-wfldb_db_simapro.apply_strategy(partial(change_database_name,
-                                        new_db_name = wfldb_db_name_simapro,
-                                        ))
+wfldb_db_simapro.rename(wfldb_db_name_simapro)
 
-wfldb_db_simapro.apply_strategy(partial(migrate_from_excel_file,
-                                        excel_migration_filepath = LCI_wfldb_simapro_folderpath / "custom_migration_WFLDB.xlsx",
-                                        migrate_activities = False,
-                                        migrate_exchanges = True),
-                                verbose = True)
+wfldb_db_simapro.migrate(LCI_wfldb_simapro_folderpath / "custom_migration_WFLDB.xlsx")
 
-wfldb_db_simapro.apply_strategy(partial(link.link_biosphere_flows_externally,
-                                        biosphere_db_name = biosphere_db_name_simapro,
-                                        biosphere_db_name_unlinked = unlinked_biosphere_db_name,
-                                        other_biosphere_databases = None,
-                                        linking_order = None,
-                                        relink = False,
-                                        strip = True,
-                                        case_insensitive = True,
-                                        remove_special_characters = False,
-                                        verbose = True), verbose = True)
+wfldb_db_simapro.link_biosphere(biosphere_db_name_simapro, unlinked_biosphere_db_name, relink = False)
 
-wfldb_db_simapro.apply_strategy(partial(link.link_activities_internally,
-                                        production_exchanges = True,
-                                        substitution_exchanges = True,
-                                        technosphere_exchanges = True,
-                                        relink = False,
-                                        strip = True,
-                                        case_insensitive = True,
-                                        remove_special_characters = False,
-                                        verbose = True), verbose = True)
+wfldb_db_simapro.link_internally()
 
-wfldb_db_simapro.apply_strategy(partial(link.link_activities_externally,
-                                        link_to_databases = (ecoinvent_db_name_simapro,),
-                                        link_production_exchanges = False,
-                                        link_substitution_exchanges = False,
-                                        link_technosphere_exchanges = True,
-                                        relink = False,
-                                        strip = True,
-                                        case_insensitive = True,
-                                        remove_special_characters = False,
-                                        verbose = True), verbose = True)
+wfldb_db_simapro.link_to(ecoinvent_db_name_simapro,
+                         production = False,
+                         substitution = False,
+                         technosphere = True,
+                         relink = False)
 
 print("\n------- Statistics")
 wfldb_db_simapro.statistics()
@@ -406,177 +243,85 @@ wfldb_db_simapro.statistics()
 # wfldb_db_simapro.write_excel(only_unlinked = True)
 # Make a new biosphere database for the flows which are currently not linked
 # Add unlinked biosphere flows with a custom function
-utils.add_unlinked_flows_to_biosphere_database(db = wfldb_db_simapro,
-                                               biosphere_db_name_unlinked = unlinked_biosphere_db_name,
-                                               biosphere_db_name = biosphere_db_name_simapro,
-                                               verbose = True)
+wfldb_db_simapro.add_unlinked_to_biosphere(unlinked_biosphere_db_name, biosphere_db_name_simapro)
 print("\n------- Statistics")
 wfldb_db_simapro.statistics()
 
 # Delete wfldb database if already existing
-if wfldb_db_name_simapro in bw2data.databases:
-    print("\n------- Delete database: " + wfldb_db_name_simapro)
-    del bw2data.databases[wfldb_db_name_simapro]
-
 # Write database
-print("\n------- Write database: " + wfldb_db_name_simapro)
-wfldb_db_simapro.write_database()
+wfldb_db_simapro.write(overwrite = True)
 
 # Free up memory
 del wfldb_db_simapro
 
 #%% Import SALCA LCI database from SimaPro
-salca_db_simapro: bw2io.importers.base_lci.LCIImporter = bw2io.importers.base_lci.LCIImporter(salca_db_name_simapro)
-salca_db_simapro.data: list[dict] = select_inventory_using_regex(db_var = copy.deepcopy(original_ecoinvent_db_simapro.data),
-                                                                 exclude = False,
-                                                                 include = True,
-                                                                 patterns = SALCA_patterns,
-                                                                 case_sensitive = True)
-salca_db_simapro.apply_strategy(partial(change_database_name,
-                                        new_db_name = salca_db_name_simapro,
-                                        ))
+salca_db_simapro: LCIImporter = original_ecoinvent_db_simapro.select(SALCA_patterns,
+                                                                     exclude = False,
+                                                                     db_name = salca_db_name_simapro)
 
-salca_db_simapro.apply_strategy(partial(migrate_from_excel_file,
-                                        excel_migration_filepath = LCI_salca_simapro_folderpath / "custom_migration_SALCA.xlsx",
-                                        migrate_activities = False,
-                                        migrate_exchanges = True),
-                                verbose = True)
+salca_db_simapro.migrate(LCI_salca_simapro_folderpath / "custom_migration_SALCA.xlsx")
 
-salca_db_simapro.apply_strategy(partial(link.link_activities_internally,
-                                        production_exchanges = True,
-                                        substitution_exchanges = True,
-                                        technosphere_exchanges = True,
-                                        relink = False,
-                                        strip = True,
-                                        case_insensitive = True,
-                                        remove_special_characters = False,
-                                        verbose = True), verbose = True) 
+salca_db_simapro.link_internally()
 
-salca_db_simapro.apply_strategy(partial(link.link_activities_externally,
-                                        link_to_databases = (ecoinvent_db_name_simapro, wfldb_db_name_simapro),
-                                        link_production_exchanges = False,
-                                        link_substitution_exchanges = False,
-                                        link_technosphere_exchanges = True,
-                                        relink = False,
-                                        strip = True,
-                                        case_insensitive = True,
-                                        remove_special_characters = False,
-                                        verbose = True), verbose = True)
+salca_db_simapro.link_to(ecoinvent_db_name_simapro, wfldb_db_name_simapro,
+                         production = False,
+                         substitution = False,
+                         technosphere = True,
+                         relink = False)
 
 print("\n------- Statistics")
 salca_db_simapro.statistics()
 # salca_db_simapro.write_excel(only_unlinked = True)
 
 # Delete ecoinvent database if already existing
-if salca_db_name_simapro in bw2data.databases:
-    print("\n------- Delete database: " + salca_db_name_simapro)
-    del bw2data.databases[salca_db_name_simapro]
-
 # Write database
-print("\n------- Write database: " + salca_db_name_simapro)
-salca_db_simapro.write_database()
+salca_db_simapro.write(overwrite = True)
 
 # Free up memory
 del salca_db_simapro
 
 
 #%% Import Agribalyse LCI database from SimaPro
-agribalyse_db_simapro: bw2io.importers.base_lci.LCIImporter = import_SimaPro_LCI_inventories(SimaPro_CSV_LCI_filepaths = [LCI_agribalyse_simapro_folderpath / "AGB.CSV"],
-                                                                                             db_name = agribalyse_db_name_simapro,
-                                                                                             encoding = "latin-1",
-                                                                                             delimiter = "\t",
-                                                                                             verbose = True)
+agribalyse_db_simapro: SimaProLCIImporter = SimaProLCIImporter(LCI_agribalyse_simapro_folderpath / "AGB.CSV",
+                                                               agribalyse_db_name_simapro,
+                                                               encoding = "latin-1",
+                                                               delimiter = "\t")
 
-agribalyse_db_simapro.apply_strategy(partial(link.link_biosphere_flows_externally,
-                                             biosphere_db_name = biosphere_db_name_simapro,
-                                             biosphere_db_name_unlinked = unlinked_biosphere_db_name,
-                                             other_biosphere_databases = None,
-                                             linking_order = None,
-                                             relink = False,
-                                             strip = True,
-                                             case_insensitive = True,
-                                             remove_special_characters = False,
-                                             verbose = True), verbose = True)
+agribalyse_db_simapro.link_biosphere(biosphere_db_name_simapro, unlinked_biosphere_db_name, relink = False)
 
-agribalyse_db_simapro.apply_strategy(partial(migrate_from_excel_file,
-                                             excel_migration_filepath = LCI_agribalyse_simapro_folderpath / "custom_migration_AGB.xlsx",
-                                             migrate_activities = False,
-                                             migrate_exchanges = True),
-                                    verbose = True)
+agribalyse_db_simapro.migrate(LCI_agribalyse_simapro_folderpath / "custom_migration_AGB.xlsx")
 
-agribalyse_db_simapro.apply_strategy(partial(link.link_activities_internally,
-                                             production_exchanges = True,
-                                             substitution_exchanges = True,
-                                             technosphere_exchanges = True,
-                                             relink = False,
-                                             strip = True,
-                                             case_insensitive = True,
-                                             remove_special_characters = False,
-                                             verbose = True), verbose = True)
+agribalyse_db_simapro.link_internally()
 
 print("\n------- Statistics")
 agribalyse_db_simapro.statistics()
 
 # Make a new biosphere database for the flows which are currently not linked
 # Add unlinked biosphere flows with a custom function
-utils.add_unlinked_flows_to_biosphere_database(db = agribalyse_db_simapro,
-                                               biosphere_db_name_unlinked = unlinked_biosphere_db_name,
-                                               biosphere_db_name = biosphere_db_name_simapro,
-                                               verbose = True)
+agribalyse_db_simapro.add_unlinked_to_biosphere(unlinked_biosphere_db_name, biosphere_db_name_simapro)
 print("\n------- Statistics")
 agribalyse_db_simapro.statistics()
 
 # Delete agribalyse database if already existing
-if agribalyse_db_name_simapro in bw2data.databases:
-    print("\n------- Delete database: " + agribalyse_db_name_simapro)
-    del bw2data.databases[agribalyse_db_name_simapro]
-
 # Write database
-print("\n------- Write database: " + agribalyse_db_name_simapro)
-agribalyse_db_simapro.write_database()
+agribalyse_db_simapro.write(overwrite = True)
 
 # Free up memory
 del agribalyse_db_simapro
 
 #%% Import AgriFootprint LCI database from SimaPro
-agrifootprint_db_simapro: bw2io.importers.base_lci.LCIImporter = import_SimaPro_LCI_inventories(SimaPro_CSV_LCI_filepaths = [LCI_agrifootprint_simapro_folderpath / "AGF.CSV"],
-                                                                                                db_name = agrifootprint_db_name_simapro,
-                                                                                                encoding = "latin-1",
-                                                                                                delimiter = "\t",
-                                                                                                verbose = True)
+agrifootprint_db_simapro: SimaProLCIImporter = SimaProLCIImporter(LCI_agrifootprint_simapro_folderpath / "AGF.CSV",
+                                                                  agrifootprint_db_name_simapro,
+                                                                  encoding = "latin-1",
+                                                                  delimiter = "\t")
 
-agrifootprint_db_simapro.apply_strategy(partial(link.link_biosphere_flows_externally,
-                                                biosphere_db_name = biosphere_db_name_simapro,
-                                                biosphere_db_name_unlinked = unlinked_biosphere_db_name,
-                                                other_biosphere_databases = None,
-                                                linking_order = None,
-                                                relink = False,
-                                                strip = True,
-                                                case_insensitive = True,
-                                                remove_special_characters = False,
-                                                verbose = True), verbose = True)
+agrifootprint_db_simapro.link_biosphere(biosphere_db_name_simapro, unlinked_biosphere_db_name, relink = False)
 
-agrifootprint_db_simapro.apply_strategy(partial(migrate_from_excel_file,
-                                                excel_migration_filepath = LCI_agrifootprint_simapro_folderpath / "custom_migration_AGF_technosphere.xlsx",
-                                                migrate_activities = False,
-                                                migrate_exchanges = True),
-                                        verbose = True)
+agrifootprint_db_simapro.migrate(LCI_agrifootprint_simapro_folderpath / "custom_migration_AGF_technosphere.xlsx")
 
-agrifootprint_db_simapro.apply_strategy(partial(migrate_from_excel_file,
-                                                excel_migration_filepath = LCI_agrifootprint_simapro_folderpath / "custom_migration_AGF_substitution.xlsx",
-                                                migrate_activities = False,
-                                                migrate_exchanges = True),
-                                        verbose = True)
+agrifootprint_db_simapro.migrate(LCI_agrifootprint_simapro_folderpath / "custom_migration_AGF_substitution.xlsx")
 
-agrifootprint_db_simapro.apply_strategy(partial(link.link_activities_internally,
-                                                production_exchanges = True,
-                                                substitution_exchanges = True,
-                                                technosphere_exchanges = True,
-                                                relink = False,
-                                                strip = True,
-                                                case_insensitive = True,
-                                                remove_special_characters = False,
-                                                verbose = True), verbose = True)
+agrifootprint_db_simapro.link_internally()
 
 print("\n------- Statistics")
 agrifootprint_db_simapro.statistics()
@@ -584,21 +329,13 @@ agrifootprint_db_simapro.statistics()
 
 # Make a new biosphere database for the flows which are currently not linked
 # Add unlinked biosphere flows with a custom function
-utils.add_unlinked_flows_to_biosphere_database(db = agrifootprint_db_simapro,
-                                               biosphere_db_name_unlinked = unlinked_biosphere_db_name,
-                                               biosphere_db_name = biosphere_db_name_simapro,
-                                               verbose = True)
+agrifootprint_db_simapro.add_unlinked_to_biosphere(unlinked_biosphere_db_name, biosphere_db_name_simapro)
 print("\n------- Statistics")
 agrifootprint_db_simapro.statistics()
 
 # Delete agrifootprint database if already existing
-if agrifootprint_db_name_simapro in bw2data.databases:
-    print("\n------- Delete database: " + agrifootprint_db_name_simapro)
-    del bw2data.databases[agrifootprint_db_name_simapro]
-
 # Write database
-print("\n------- Write database: " + agrifootprint_db_name_simapro)
-agrifootprint_db_simapro.write_database()
+agrifootprint_db_simapro.write(overwrite = True)
 
 # Free up memory
 del agrifootprint_db_simapro

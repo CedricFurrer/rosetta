@@ -1,0 +1,109 @@
+{SimaPro 9.5.0.0}
+{processes}
+{Date: 05.11.2026}
+{Time: 12:00:00}
+{Project: rosetta test}
+{CSV Format version: 9.0.0}
+{CSV separator: Tab}
+{Decimal separator: .}
+{Date separator: .}
+{Short date format: dd.MM.yyyy}
+
+Process
+
+Category type
+material
+
+Process identifier
+ECO0001
+
+Type
+Unit process
+
+Process name
+Diesel {CH}| market for diesel | Cut-off, U
+
+Status
+
+
+Time period
+Unspecified
+
+Comment
+
+
+Products
+Diesel {CH}| market for diesel | Cut-off, U	kg	1	100	not defined	Fuels\Market	
+
+Avoided products
+
+Resources
+Oil, crude	in ground	kg	1.05	Lognormal	1.2	0	0	
+
+Materials/fuels
+
+Electricity/heat
+Electricity, medium voltage {CH}| market for | Cut-off, U	kWh	0.01	Undefined	0	0	0	
+
+Emissions to air
+Carbon dioxide, fossil	high. pop.	kg	0.02	Lognormal	1.1	0	0	
+Methane		kg	0.001	Undefined	0	0	0	
+
+Emissions to water
+
+Emissions to soil
+
+Final waste flows
+
+Non material emissions
+
+Social issues
+
+Economic issues
+
+Waste to treatment
+
+End
+
+Process
+
+Category type
+energy
+
+Process identifier
+ECO0002
+
+Type
+Unit process
+
+Process name
+Electricity, medium voltage {CH}| market for | Cut-off, U
+
+Status
+
+
+Time period
+Unspecified
+
+Comment
+
+
+Products
+Electricity, medium voltage {CH}| market for | Cut-off, U	kWh	1	100	not defined	Energy\Electricity	
+
+Resources
+Water, river, CH	in water	m3	0.002	Undefined	0	0	0	
+
+Emissions to air
+Carbon dioxide, fossil		kg	0.1	Normal	0.0004	0	0	
+Sulfur dioxide, CH		kg	0.0001	Undefined	0	0	0	
+
+Final waste flows
+Waste, unspecified		kg	0.003	Undefined	0	0	0	
+
+End
+
+Project Input parameters
+
+End
+

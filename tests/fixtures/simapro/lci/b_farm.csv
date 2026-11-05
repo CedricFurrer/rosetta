@@ -1,0 +1,69 @@
+{SimaPro 9.5.0.0}
+{processes}
+{Date: 05.11.2026}
+{Time: 12:00:00}
+{Project: rosetta test}
+{CSV Format version: 9.0.0}
+{CSV separator: Tab}
+{Decimal separator: .}
+{Date separator: .}
+{Short date format: dd.MM.yyyy}
+
+Process
+
+Category type
+material
+
+Process identifier
+FARM0001
+
+Type
+Unit process
+
+Process name
+Wheat grain, at farm/CH U
+
+Status
+
+
+Time period
+Unspecified
+
+Comment
+
+
+Products
+Wheat grain, at farm/CH U	kg	8	90	not defined	Agriculture\Plant production	
+Wheat straw, at farm/CH U	kg	2	10	not defined	Agriculture\Plant production	
+
+Avoided products
+Electricity, medium voltage {CH}| market for | Cut-off, U	kWh	0.5	Undefined	0	0	0	
+
+Resources
+Water, river, CH	in water	m3	0.3	Undefined	0	0	0	
+Occupation, arable land	land	m2a	1	Undefined	0	0	0	
+
+Materials/fuels
+Diesel {CH}| market for diesel | Cut-off, U	kg	0.4	Lognormal	1.3	0	0	
+Unknown product without dataset	kg	0	Undefined	0	0	0	
+
+Electricity/heat
+Electricity, medium voltage {CH}| market for | Cut-off, U	kWh	1.5	Undefined	0	0	0	
+
+Emissions to air
+Ammonia, CH	low. pop.	kg	0.05	Lognormal	1.5	0	0	
+Dinitrogen monoxide		kg	0.002	Undefined	0	0	0	
+Methane		kg	0.003	Undefined	0	0	0	
+
+Emissions to water
+Nitrate	groundwater	kg	0.2	Undefined	0	0	0	
+
+Emissions to soil
+Cadmium	agricultural	kg	0.00001	Undefined	0	0	0	
+
+End
+
+Project Input parameters
+
+End
+

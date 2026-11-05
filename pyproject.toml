@@ -7,7 +7,7 @@ name = "rosetta"
 dynamic = ["version"]
 description = "Functions to import, harmonize, link, calculate and export SimaPro LCI/LCIA data in Brightway2."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [{ name = "Cedric Furrer" }]
 dependencies = [
     "bw2io==0.8.12",
@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "ruff"]
 
 [project.urls]
 Repository = "https://github.com/CedricFurrer/rosetta"
@@ -37,3 +37,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 rosetta = ["defaults/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
